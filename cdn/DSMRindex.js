@@ -487,6 +487,206 @@ function SolarSendData() {
 
 }
 
+let heltyScanTimer = null;
+let heltyManageTimer = null;
+
+function heltyApi(path, method, body) {
+  const opts = { method: method || "GET", headers: { "Content-Type": "application/json" } };
+  if (body !== undefined) opts.body = JSON.stringify(body);
+  return fetch(APIHOST + path, opts).then(r => r.json());
+}
+
+function heltySetStatus(elId, text, isError) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  el.textContent = text || "";
+  el.className = "helty-status" + (isError ? " helty-error" : "");
+}
+
+function fetchHeltyConfig() {
+  return heltyApi("/api/v2/helty/config").then(json => {
+    document.getElementById("helty_host").value = json.host || "";
+    document.getElementById("helty_port").value = json.port || 5001;
+    document.getElementById("helty_poll").value = json.poll_interval_sec || 30;
+    document.getElementById("helty_enabled").checked = !!json.enabled;
+    return json;
+  }).catch(err => {
+    console.error("Helty config load failed", err);
+  });
+}
+
+function heltySave() {
+  const payload = {
+    enabled: document.getElementById("helty_enabled").checked,
+    host: document.getElementById("helty_host").value.trim(),
+    port: parseInt(document.getElementById("helty_port").value, 10) || 5001,
+    poll_interval_sec: parseInt(document.getElementById("helty_poll").value, 10) || 30
+  };
+  heltyApi("/api/v2/helty/config", "POST", payload)
+    .then(() => heltySetStatus("helty_discover_status", "Configuration saved.", false))
+    .catch(err => heltySetStatus("helty_discover_status", "Save failed: " + err, true));
+}
+
+function heltyTest() {
+  const host = document.getElementById("helty_host").value.trim();
+  const port = parseInt(document.getElementById("helty_port").value, 10) || 5001;
+  if (!host) {
+    heltySetStatus("helty_discover_status", "Enter a host or IP address.", true);
+    return;
+  }
+  heltySetStatus("helty_discover_status", "Testing connection...", false);
+  heltyApi("/api/v2/helty/discover", "POST", { mode: "test", host, port })
+    .then(json => {
+      if (json.ok) heltySetStatus("helty_discover_status", "Connected: " + (json.name || host), false);
+      else heltySetStatus("helty_discover_status", json.error || "Connection failed", true);
+    })
+    .catch(err => heltySetStatus("helty_discover_status", "Test failed: " + err, true));
+}
+
+function heltyRenderScanResults(results) {
+  const table = document.getElementById("helty_scan_results");
+  const body = document.getElementById("helty_scan_results_body");
+  if (!table || !body) return;
+  body.innerHTML = "";
+  if (!results || !results.length) {
+    table.style.display = "none";
+    return;
+  }
+  results.forEach(item => {
+    const row = document.createElement("tr");
+    row.innerHTML = `<td>${item.name || "-"}</td><td>${item.host}</td><td><button type="button">Select</button></td>`;
+    row.querySelector("button").onclick = () => {
+      document.getElementById("helty_host").value = item.host;
+      heltySetStatus("helty_discover_status", "Selected " + (item.name || item.host), false);
+    };
+    body.appendChild(row);
+  });
+  table.style.display = "";
+}
+
+function heltyPollScanStatus() {
+  heltyApi("/api/v2/helty/discover")
+    .then(json => {
+      if (json.phase === 2) {
+        heltySetStatus("helty_scan_progress", "Scanning... " + (json.progress || 0) + "%", false);
+      } else if (json.phase === 3) {
+        clearInterval(heltyScanTimer);
+        heltyScanTimer = null;
+        heltySetStatus("helty_scan_progress", "Scan complete.", false);
+        heltyRenderScanResults(json.results || []);
+      } else if (json.phase === 4) {
+        clearInterval(heltyScanTimer);
+        heltyScanTimer = null;
+        heltySetStatus("helty_scan_progress", json.error || "Scan failed", true);
+      }
+    })
+    .catch(err => {
+      clearInterval(heltyScanTimer);
+      heltyScanTimer = null;
+      heltySetStatus("helty_scan_progress", "Scan status failed: " + err, true);
+    });
+}
+
+function heltyScan() {
+  heltySetStatus("helty_scan_progress", "Starting network scan...", false);
+  document.getElementById("helty_scan_results").style.display = "none";
+  heltyApi("/api/v2/helty/discover", "POST", { mode: "scan", port: parseInt(document.getElementById("helty_port").value, 10) || 5001 })
+    .then(() => {
+      if (heltyScanTimer) clearInterval(heltyScanTimer);
+      heltyScanTimer = setInterval(heltyPollScanStatus, 2000);
+      heltyPollScanStatus();
+    })
+    .catch(err => heltySetStatus("helty_scan_progress", "Scan start failed: " + err, true));
+}
+
+function heltyFormatValue(label, value, unit) {
+  if (value === undefined || value === null || value === "") return "";
+  return `<div class="helty-card"><div class="helty-card-label">${label}</div><div class="helty-card-value">${value}${unit ? " " + unit : ""}</div></div>`;
+}
+
+function heltyRefresh() {
+  return heltyApi("/api/v2/helty/live").then(json => {
+    const statusEl = document.getElementById("helty_manage_status");
+    if (statusEl) {
+      if (!json.enabled) statusEl.textContent = "Hub disabled";
+      else if (json.connected) statusEl.textContent = "Connected: " + (json.name || json.host);
+      else statusEl.textContent = "Not connected";
+      statusEl.className = "helty-badge " + (json.connected ? "helty-ok" : "helty-warn");
+    }
+
+    const grid = document.getElementById("helty_telemetry");
+    if (grid) {
+      let html = "";
+      html += heltyFormatValue("Fan mode", json.fan_mode);
+      html += heltyFormatValue("Indoor temp", json.indoor_temperature, "°C");
+      html += heltyFormatValue("Outdoor temp", json.outdoor_temperature, "°C");
+      html += heltyFormatValue("Humidity", json.indoor_humidity, "%");
+      if (json.co2 > 0) html += heltyFormatValue("CO2", json.co2, "ppm");
+      if (json.filter_hours) html += heltyFormatValue("Filter hours", json.filter_hours);
+      if (json.last_poll_age_sec !== undefined) html += heltyFormatValue("Last update", json.last_poll_age_sec, "s ago");
+      grid.innerHTML = html || "<div class=\"helty-status\">No telemetry yet.</div>";
+    }
+
+    if (json.fan_mode) document.getElementById("helty_fan_mode").value = json.fan_mode;
+    if (json.led !== undefined) document.getElementById("helty_led").checked = !!json.led;
+    return json;
+  }).catch(err => {
+    heltySetStatus("helty_manage_message", "Refresh failed: " + err, true);
+  });
+}
+
+function heltyApplyControls() {
+  const payload = {
+    fan_mode: document.getElementById("helty_fan_mode").value,
+    led: document.getElementById("helty_led").checked
+  };
+  heltyApi("/api/v2/helty/command", "POST", payload)
+    .then(json => {
+      if (json.ok) {
+        heltySetStatus("helty_manage_message", "Command applied.", false);
+        heltyRefresh();
+      } else {
+        heltySetStatus("helty_manage_message", json.error || "Command failed", true);
+      }
+    })
+    .catch(err => heltySetStatus("helty_manage_message", "Command failed: " + err, true));
+}
+
+function heltyResetFilter() {
+  if (!window.confirm("Reset filter counter on the unit?")) return;
+  heltyApi("/api/v2/helty/command", "POST", { reset_filter: true })
+    .then(json => {
+      if (json.ok) {
+        heltySetStatus("helty_manage_message", "Filter counter reset.", false);
+        heltyRefresh();
+      } else {
+        heltySetStatus("helty_manage_message", json.error || "Reset failed", true);
+      }
+    })
+    .catch(err => heltySetStatus("helty_manage_message", "Reset failed: " + err, true));
+}
+
+function heltyStartManagePolling() {
+  heltyRefresh();
+  if (heltyManageTimer) clearInterval(heltyManageTimer);
+  heltyManageTimer = setInterval(heltyRefresh, 10000);
+}
+
+function heltyStopManagePolling() {
+  if (heltyManageTimer) {
+    clearInterval(heltyManageTimer);
+    heltyManageTimer = null;
+  }
+}
+
+function heltyStartDiscover() {
+  fetchHeltyConfig();
+  if (heltyScanTimer) {
+    clearInterval(heltyScanTimer);
+    heltyScanTimer = null;
+  }
+}
+
 //entry point 
 window.onload=bootsTrapMain;
 
@@ -1672,6 +1872,7 @@ function SendNetSwitchJson() {
     document.body.classList.remove("menu-open");
     clearInterval(tabTimer);  
     clearInterval(NRGStatusTimer);
+    heltyStopManagePolling();
 	if (objDAL) {
 		objDAL.stopDashLivePolling();
 		objDAL.stopDashHistPolling();
@@ -1731,7 +1932,13 @@ function SendNetSwitchJson() {
 			break;
 		case "bNRGM":
 			nrgm_getstatus();
-			break;			
+			break;
+		case "bHeltyDiscover":
+			heltyStartDiscover();
+			break;
+		case "bHeltyManage":
+			heltyStartManagePolling();
+			break;
     }
   } // openTab()
   

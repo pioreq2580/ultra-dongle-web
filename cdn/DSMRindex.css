@@ -1275,3 +1275,79 @@ select#languageSelector {background-color: unset; color: #fff; border: none;colo
   border: 1px solid rgba(0,0,0,0.10);
   background: #fff;
 }
+
+.helty-panel {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 12px 16px 24px;
+}
+
+.helty-actions button {
+  margin: 4px 6px;
+}
+
+.helty-status {
+  margin-top: 12px;
+  color: #333;
+}
+
+.helty-status.helty-error {
+  color: #b00020;
+}
+
+.helty-badge {
+  display: inline-block;
+  margin: 12px 0;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: #eee;
+  font-weight: 600;
+}
+
+.helty-badge.helty-ok {
+  background: #e7f6ea;
+  color: #1b5e20;
+}
+
+.helty-badge.helty-warn {
+  background: #fff3e0;
+  color: #e65100;
+}
+
+.helty-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.helty-card {
+  background: #f7f9fc;
+  border-radius: 12px;
+  padding: 12px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+}
+
+.helty-card-label {
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 6px;
+}
+
+.helty-card-value {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.helty-table {
+  width: 100%;
+  margin-top: 12px;
+  border-collapse: collapse;
+}
+
+.helty-table th,
+.helty-table td {
+  padding: 8px;
+  border-bottom: 1px solid rgba(0,0,0,0.08);
+  text-align: left;
+}

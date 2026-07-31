@@ -27,6 +27,11 @@
 	  <li><a id='bDashTab'    	data-i18n-key="mnu-dash" class='tabButton nav-item active' href="#DashTab">Dash</a></li>
 	  <li><a id='bActualTab'    data-i18n-key="mnu-actual" class='tabButton nav-item' href="#ActualTab" >Actueel</a></li>
 	  <li><a id='bInsightsTab'    data-i18n-key="mnu-insghts" class='tabButton nav-item' href="#InsightsTab" >Insights</a></li>
+	  <li><a id='bHeltyTab'       data-i18n-key="mnu-helty" href="javascript:void(0);">Air Guard</a>
+        <ul>
+          <li><a id='bHeltyDiscover' data-i18n-key="mnu-helty-discover" class='tabButton nav-item' href="#HeltyDiscover">Discover</a></li>
+          <li><a id='bHeltyManage'   data-i18n-key="mnu-helty-manage" class='tabButton nav-item' href="#HeltyManage">Manage</a></li>
+        </ul></li>
 	  	  
       <li><a id='bHoursTab'     data-i18n-key="mnu-hour" class='tabButton nav-item' href="#HoursTab" >Uur</a></li>
       <li><a id='bDaysTab'      data-i18n-key="mnu-day" class='tabButton nav-item' href="#DaysTab" >Dag</a></li>
@@ -782,6 +787,61 @@
 	<div><b>Redirect over <span id='counter'>45</span> seconden.</b>
 	<hr>Indien de pagina niet automatisch getoond wordt klik dan op <a href='/'>Home pagina</a></div>
     </section>  
+
+	<section id="HeltyDiscover" class="tabName">
+		<div class="helty-panel">
+		<h1 class="align-c" data-i18n-key="helty-discover-title">Air Guard Discover</h1>
+		<p data-i18n-key="helty-discover-intro">Connect one Helty Air Guard unit on your LAN (TCP port 5001).</p>
+		<hr>
+		<label for="helty_host" data-i18n-key="helty-host">Host / IP address</label><br>
+		<input type="text" id="helty_host" placeholder="192.168.1.50" style="width:100%"><br><br>
+		<label for="helty_port" data-i18n-key="helty-port">Port</label><br>
+		<input type="number" id="helty_port" value="5001"><br><br>
+		<label for="helty_poll" data-i18n-key="helty-poll-interval">Poll interval (seconds)</label><br>
+		<input type="number" id="helty_poll" value="30" min="10"><br><br>
+		<label><input type="checkbox" id="helty_enabled"> <span data-i18n-key="helty-enabled">Enable Air Guard hub</span></label>
+		<hr>
+		<div class="helty-actions align-c">
+			<button type="button" onclick="heltyTest()" data-i18n-key="helty-btn-test">Test connection</button>
+			<button type="button" onclick="heltyScan()" data-i18n-key="helty-btn-scan">Scan network</button>
+			<button type="button" onclick="heltySave()" data-i18n-key="btn-save">Save</button>
+		</div>
+		<div id="helty_discover_status" class="helty-status"></div>
+		<div id="helty_scan_progress" class="helty-status"></div>
+		<table id="helty_scan_results" class="helty-table" style="display:none">
+			<thead><tr><th data-i18n-key="helty-col-name">Name</th><th data-i18n-key="helty-col-host">Host</th><th></th></tr></thead>
+			<tbody id="helty_scan_results_body"></tbody>
+		</table>
+		</div>
+    </section>
+
+	<section id="HeltyManage" class="tabName">
+		<div class="helty-panel">
+		<h1 class="align-c" data-i18n-key="helty-manage-title">Air Guard Manage</h1>
+		<div id="helty_manage_status" class="helty-badge">...</div>
+		<div id="helty_telemetry" class="helty-grid"></div>
+		<hr>
+		<h3 data-i18n-key="helty-controls">Controls</h3>
+		<label for="helty_fan_mode" data-i18n-key="helty-fan-mode">Fan mode</label><br>
+		<select id="helty_fan_mode">
+			<option value="OFF">OFF</option>
+			<option value="LOW">LOW</option>
+			<option value="MEDIUM">MEDIUM</option>
+			<option value="HIGH">HIGH</option>
+			<option value="MAX">MAX</option>
+			<option value="BOOST">BOOST</option>
+			<option value="NIGHT">NIGHT</option>
+			<option value="FREE_COOLING">FREE_COOLING</option>
+		</select><br><br>
+		<label><input type="checkbox" id="helty_led"> <span data-i18n-key="helty-led">Front LED</span></label><br><br>
+		<div class="helty-actions align-c">
+			<button type="button" onclick="heltyApplyControls()" data-i18n-key="helty-btn-apply">Apply</button>
+			<button type="button" onclick="heltyResetFilter()" data-i18n-key="helty-btn-reset-filter">Reset filter</button>
+			<button type="button" onclick="heltyRefresh()" data-i18n-key="helty-btn-refresh">Refresh</button>
+		</div>
+		<div id="helty_manage_message" class="helty-status"></div>
+		</div>
+    </section>
 
 	<section id="Solar" class="tabName">
 		<div id=eid-setup>
