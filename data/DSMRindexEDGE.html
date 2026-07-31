@@ -6,10 +6,17 @@
 	<meta charset="UTF-8">
 	<meta name="robots" content="noindex">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-	<!-- Frontend CDN: pioreq2580/ultra-dongle-web@main (public web repo). -->
+	<!-- Frontend CDN: pioreq2580/ultra-dongle-web@CDN_REV (public web repo). -->
 	<meta name="msapplication-TileImage" content="https://cdn.jsdelivr.net/gh/mhendriks/P1-Dongel-ESP32@latest/cdn/favicon/ms-icon-310x310.png">
 
-	<link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/gh/pioreq2580/ultra-dongle-web@main/cdn/DSMRindex.css">
+	<script>
+	  window.__CDN_REPO__ = "pioreq2580/ultra-dongle-web";
+	  window.__CDN_REV__  = "6e13942";
+	  window.__cdnUrl = function (file) {
+	    return "https://cdn.jsdelivr.net/gh/" + window.__CDN_REPO__ + "@" + window.__CDN_REV__ + "/cdn/" + file + "?v=" + window.__CDN_REV__;
+	  };
+	</script>
+	<link rel="stylesheet" type="text/css" id="cdn-css">
     <link href="https://fonts.googleapis.com/css?family=Dosis:400,700" rel="stylesheet">	
     <link rel="icon" type="image/png" href="https://cdn.jsdelivr.net/gh/mhendriks/P1-Dongel-ESP32@5.8/cdn/favicon/favicon-32x32.png" sizes="32x32" />
     <link rel="apple-touch-icon" sizes="180x180" href="https://cdn.jsdelivr.net/gh/mhendriks/P1-Dongel-ESP32@latest/cdn/favicon/apple-icon-180x180.png">
@@ -18,16 +25,22 @@
 	<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.9.4/Chart.min.js"></script>
 	<script type="text/javascript" src="https://cdn.jsdelivr.net/gh/mhendriks/P1-Dongel-ESP32@latest/cdn/chartjs-plugin-labels.min.js"></script>
 	<script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/7.0.0/math.min.js" type="text/javascript"></script>
+	<script>
+	  document.getElementById("cdn-css").href = window.__cdnUrl("DSMRindex.css");
+	  [
+	    "cdn-config.js",
+	    "dal.js",
+	    "DSMRgraphics.js",
+	    "DSMRindex.js",
+	    "burnup.js",
+	    "pricecap.js"
+	  ].forEach(function (file) {
+	    document.write('<script src="' + window.__cdnUrl(file) + '"><\/script>');
+	  });
+	</script>
   </head>
   <body>
   	<noscript><strong>Please enable JavaScript to continue.</strong></noscript>
-
-	<script src="https://cdn.jsdelivr.net/gh/pioreq2580/ultra-dongle-web@main/cdn/cdn-config.js"></script>
-	<script src="https://cdn.jsdelivr.net/gh/pioreq2580/ultra-dongle-web@main/cdn/dal.js"></script>
-	<script src="https://cdn.jsdelivr.net/gh/pioreq2580/ultra-dongle-web@main/cdn/DSMRgraphics.js"></script>
-	<script src="https://cdn.jsdelivr.net/gh/pioreq2580/ultra-dongle-web@main/cdn/DSMRindex.js"></script>
-	<script src="https://cdn.jsdelivr.net/gh/pioreq2580/ultra-dongle-web@main/cdn/burnup.js"></script>
-	<script src="https://cdn.jsdelivr.net/gh/pioreq2580/ultra-dongle-web@main/cdn/pricecap.js"></script>
 
   	<script>
 	  //============================================================================  
@@ -39,10 +52,11 @@
 	  function readPageBody()
 	  {
 		console.log("readPageBody() ..");
-		const cdnBase = (typeof CDN_BASE !== 'undefined')
+		const cdnRev = (typeof CDN_REV !== "undefined") ? CDN_REV : window.__CDN_REV__;
+		const cdnBase = (typeof CDN_BASE !== "undefined")
 		  ? CDN_BASE
-		  : "https://cdn.jsdelivr.net/gh/pioreq2580/ultra-dongle-web@main/cdn";
-		fetch(cdnBase + "/DSMRindex_body.html")
+		  : "https://cdn.jsdelivr.net/gh/" + window.__CDN_REPO__ + "@" + cdnRev + "/cdn";
+		fetch(cdnBase + "/DSMRindex_body.html?v=" + cdnRev)
 		  .then(response => {
 			if (response.ok) {
 			  return response.text();
