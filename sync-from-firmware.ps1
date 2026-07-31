@@ -28,13 +28,13 @@ window.CDN_BASE = `https://cdn.jsdelivr.net/gh/` + window.CDN_REPO + `@` + windo
 window.cdnAsset = function (file) {
   return window.CDN_BASE + `/` + file + `?v=` + window.CDN_REV;
 };
-"@ | Set-Content -Encoding utf8NoBOM $cdnConfigPath
+"@ | Set-Content -Encoding utf8 $cdnConfigPath
 
   if (Test-Path $edgePath) {
     $edge = Get-Content -Raw $edgePath
     $edge = $edge -replace '(?m)^\s*<!-- Frontend CDN: pioreq2580/ultra-dongle-web@.* -->', "	<!-- Frontend CDN: pioreq2580/ultra-dongle-web@$Rev (public web repo). -->"
     $edge = $edge -replace 'window\.__CDN_REV__\s*=\s*"[^"]+"', "window.__CDN_REV__  = `"$Rev`""
-    Set-Content -Encoding utf8NoBOM -NoNewline -Path $edgePath -Value $edge
+    [System.IO.File]::WriteAllText($edgePath, $edge, (New-Object System.Text.UTF8Encoding $false))
   }
 
   Write-Host "CDN pinned to commit $Rev"
