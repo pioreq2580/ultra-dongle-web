@@ -488,12 +488,19 @@ function SolarSendData() {
 }
 
 let heltyScanTimer = null;
+let heltyTestTimer = null;
+let heltyCommandTimer = null;
 let heltyManageTimer = null;
 
 function heltyApi(path, method, body) {
   const opts = { method: method || "GET", headers: { "Content-Type": "application/json" } };
   if (body !== undefined) opts.body = JSON.stringify(body);
-  return fetch(APIHOST + path, opts).then(r => r.json());
+  return fetch(APIHOST + path, opts).then(async r => {
+    const text = await r.text();
+    if (!r.ok) throw new Error(text || ("HTTP " + r.status));
+    try { return JSON.parse(text); }
+    catch { throw new Error("Invalid JSON from device"); }
+  });
 }
 
 function heltySetStatus(elId, text, isError) {
@@ -536,11 +543,34 @@ function heltyTest() {
   }
   heltySetStatus("helty_discover_status", "Testing connection...", false);
   heltyApi("/api/v2/helty/discover", "POST", { mode: "test", host, port })
-    .then(json => {
-      if (json.ok) heltySetStatus("helty_discover_status", "Connected: " + (json.name || host), false);
-      else heltySetStatus("helty_discover_status", json.error || "Connection failed", true);
+    .then(() => {
+      if (heltyTestTimer) clearInterval(heltyTestTimer);
+      heltyTestTimer = setInterval(heltyPollTestStatus, 2000);
+      heltyPollTestStatus();
     })
     .catch(err => heltySetStatus("helty_discover_status", "Test failed: " + err, true));
+}
+
+function heltyPollTestStatus() {
+  heltyApi("/api/v2/helty/discover")
+    .then(json => {
+      if (json.phase === 1) {
+        heltySetStatus("helty_discover_status", "Testing connection...", false);
+      } else if (json.phase === 3 && json.test_host) {
+        clearInterval(heltyTestTimer);
+        heltyTestTimer = null;
+        heltySetStatus("helty_discover_status", "Connected: " + (json.test_name || json.test_host), false);
+      } else if (json.phase === 4 && json.test_host) {
+        clearInterval(heltyTestTimer);
+        heltyTestTimer = null;
+        heltySetStatus("helty_discover_status", json.error || "Connection failed", true);
+      }
+    })
+    .catch(err => {
+      clearInterval(heltyTestTimer);
+      heltyTestTimer = null;
+      heltySetStatus("helty_discover_status", "Test failed: " + err, true);
+    });
 }
 
 function heltyRenderScanResults(results) {
@@ -640,30 +670,45 @@ function heltyApplyControls() {
     fan_mode: document.getElementById("helty_fan_mode").value,
     led: document.getElementById("helty_led").checked
   };
-  heltyApi("/api/v2/helty/command", "POST", payload)
-    .then(json => {
-      if (json.ok) {
-        heltySetStatus("helty_manage_message", "Command applied.", false);
-        heltyRefresh();
-      } else {
-        heltySetStatus("helty_manage_message", json.error || "Command failed", true);
-      }
-    })
-    .catch(err => heltySetStatus("helty_manage_message", "Command failed: " + err, true));
+  heltyStartCommand(payload, "Command applied.", "Command failed");
 }
 
 function heltyResetFilter() {
   if (!window.confirm("Reset filter counter on the unit?")) return;
-  heltyApi("/api/v2/helty/command", "POST", { reset_filter: true })
+  heltyStartCommand({ reset_filter: true }, "Filter counter reset.", "Reset failed");
+}
+
+function heltyPollCommandStatus(successMsg, failurePrefix) {
+  heltyApi("/api/v2/helty/command")
     .then(json => {
-      if (json.ok) {
-        heltySetStatus("helty_manage_message", "Filter counter reset.", false);
+      if (json.phase === 1) {
+        heltySetStatus("helty_manage_message", "Sending command...", false);
+      } else if (json.phase === 3 && json.ok) {
+        clearInterval(heltyCommandTimer);
+        heltyCommandTimer = null;
+        heltySetStatus("helty_manage_message", successMsg, false);
         heltyRefresh();
-      } else {
-        heltySetStatus("helty_manage_message", json.error || "Reset failed", true);
+      } else if (json.phase === 4 || (json.phase === 3 && !json.ok)) {
+        clearInterval(heltyCommandTimer);
+        heltyCommandTimer = null;
+        heltySetStatus("helty_manage_message", json.error || failurePrefix, true);
       }
     })
-    .catch(err => heltySetStatus("helty_manage_message", "Reset failed: " + err, true));
+    .catch(err => {
+      clearInterval(heltyCommandTimer);
+      heltyCommandTimer = null;
+      heltySetStatus("helty_manage_message", failurePrefix + ": " + err, true);
+    });
+}
+
+function heltyStartCommand(payload, successMsg, failurePrefix) {
+  heltyApi("/api/v2/helty/command", "POST", payload)
+    .then(() => {
+      if (heltyCommandTimer) clearInterval(heltyCommandTimer);
+      heltyCommandTimer = setInterval(() => heltyPollCommandStatus(successMsg, failurePrefix), 2000);
+      heltyPollCommandStatus(successMsg, failurePrefix);
+    })
+    .catch(err => heltySetStatus("helty_manage_message", failurePrefix + ": " + err, true));
 }
 
 function heltyStartManagePolling() {
