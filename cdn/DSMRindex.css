@@ -1559,9 +1559,26 @@ select#languageSelector {background-color: unset; color: #fff; border: none;colo
   border-left: 4px solid #2e7d32;
 }
 
+.wiz-card.wiz-off {
+  border-left: 4px solid #ff9800;
+}
+
 .wiz-card.wiz-offline {
   border-left: 4px solid #9e9e9e;
   opacity: 0.85;
+}
+
+.wiz-probe-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 12px;
+}
+
+.wiz-probe-input {
+  width: 140px;
+  max-width: 100%;
 }
 
 .wiz-card-head {

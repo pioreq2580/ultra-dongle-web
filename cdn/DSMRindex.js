@@ -944,6 +944,7 @@ let wizConfiguredLights = [];
 
 const WIZ_SCAN_POLL_MS = 1000;
 const WIZ_PAGE_POLL_MS = 10000;
+const WIZ_SCAN_TIMEOUT_MS = 120000;
 const WIZ_DISCOVER_SCANNING = 1;
 const WIZ_DISCOVER_DONE = 2;
 const WIZ_DISCOVER_ERROR = 3;
@@ -1018,9 +1019,41 @@ function wizSaveConfig() {
     .catch(err => wizSetStatus("Save failed: " + err, true));
 }
 
+function wizScanProgressText(json) {
+  const pct = json.progress || 0;
+  const found = (json.results || []).length;
+  const foundNote = found ? " — found " + found + " light" + (found === 1 ? "" : "s") : "";
+  if (json.scan_phase === "broadcast") {
+    return (typeof t === "function" ? t("wiz-scan-broadcast") : "Broadcast…") + " " + pct + "%" + foundNote;
+  }
+  if (json.scan_phase === "subnet" && json.scan_last_host) {
+    return (typeof t === "function" ? t("wiz-scan-subnet") : "Scanning") + " " + json.scan_last_host + " (" + pct + "%)" + foundNote;
+  }
+  if (json.scan_phase === "configured") {
+    return (typeof t === "function" ? t("wiz-scan-configured") : "Checking saved lights…") + foundNote;
+  }
+  if (json.scan_phase === "probe") {
+    return (typeof t === "function" ? t("wiz-scan-probe") : "Probing") + " " + (json.scan_last_host || "") + "…";
+  }
+  return (typeof t === "function" ? t("wiz-scan-progress") : "Scanning…") + " " + pct + "%" + foundNote;
+}
+
+function wizStatusBadge(light) {
+  if (!light.online) return typeof t === "function" ? t("wiz-status-offline") : "offline";
+  if (!light.on) return typeof t === "function" ? t("wiz-status-off") : "off";
+  return typeof t === "function" ? t("wiz-status-online") : "online";
+}
+
+function wizCardClass(light) {
+  if (!light.online) return " wiz-offline";
+  if (!light.on) return " wiz-off";
+  return " wiz-online";
+}
+
 function wizScan() {
-  wizSetStatus("Scanning network...", false);
+  wizSetStatus(typeof t === "function" ? t("wiz-scan-starting") : "Starting network scan...", false);
   document.getElementById("wiz_scan_progress").textContent = "";
+  document.getElementById("wiz_scan_table").style.display = "none";
   wizApi("/api/v2/wiz/discover", "POST", {})
     .then(() => {
       if (wizScanTimer) clearInterval(wizScanTimer);
@@ -1030,19 +1063,42 @@ function wizScan() {
     .catch(err => wizSetStatus("Scan failed: " + err, true));
 }
 
+function wizProbeIp() {
+  const input = document.getElementById("wiz_probe_ip");
+  const ip = input ? input.value.trim() : "";
+  if (!ip) {
+    wizSetStatus(typeof t === "function" ? t("wiz-probe-ip-required") : "Enter an IP address.", true);
+    return;
+  }
+  wizSetStatus((typeof t === "function" ? t("wiz-scan-probe") : "Probing") + " " + ip + "...", false);
+  wizApi("/api/v2/wiz/discover", "POST", { mode: "probe", ip: ip })
+    .then(() => {
+      if (wizScanTimer) clearInterval(wizScanTimer);
+      wizScanTimer = setInterval(wizPollScan, WIZ_SCAN_POLL_MS);
+      wizPollScan();
+    })
+    .catch(err => wizSetStatus("Probe failed: " + err, true));
+}
+
 function wizPollScan() {
   wizApi("/api/v2/wiz/discover")
     .then(json => {
       const prog = document.getElementById("wiz_scan_progress");
       if (json.phase === WIZ_DISCOVER_SCANNING) {
-        prog.textContent = "Scanning... " + (json.progress || 0) + "%";
+        const partial = json.results || [];
+        if (partial.length) wizRenderScanResults(partial);
+        prog.textContent = wizScanProgressText(json);
       } else if (json.phase === WIZ_DISCOVER_DONE) {
         if (wizScanTimer) { clearInterval(wizScanTimer); wizScanTimer = null; }
         prog.textContent = "";
         wizRenderScanResults(json.results || []);
-        wizSetStatus("Found " + (json.results || []).length + " light(s).", false);
+        const n = (json.results || []).length;
+        wizSetStatus(n
+          ? ((typeof t === "function" ? t("wiz-scan-done") : "Found") + " " + n + " light(s).")
+          : (typeof t === "function" ? t("wiz-scan-none") : "Scan complete — no WiZ lights found on this subnet."), false);
       } else if (json.phase === WIZ_DISCOVER_ERROR) {
         if (wizScanTimer) { clearInterval(wizScanTimer); wizScanTimer = null; }
+        prog.textContent = "";
         wizSetStatus(json.error || "Scan failed", true);
       }
     })
@@ -1116,7 +1172,7 @@ function wizRenderLightGrid(lights) {
   }
   lights.forEach(light => {
     const card = document.createElement("div");
-    card.className = "wiz-card" + (light.online ? " wiz-online" : " wiz-offline");
+    card.className = "wiz-card" + wizCardClass(light);
     const dimPct = Math.round((light.dimming || 0) * 100 / 255);
     const displayName = wizDisplayName(light);
     const meta = wizMetaLine(light);
@@ -1138,7 +1194,7 @@ function wizRenderLightGrid(lights) {
     }
     card.innerHTML =
       "<div class='wiz-card-head'>" +
-        "<span class='wiz-badge'>" + (light.online ? "online" : "offline") + "</span>" +
+        "<span class='wiz-badge'>" + wizEscapeHtml(wizStatusBadge(light)) + "</span>" +
         "<div class='wiz-title-block'>" +
           "<input type='text' class='wiz-name-input' value='" + wizEscapeHtml(displayName) + "' data-mac='" + wizEscapeHtml(light.mac) + "' placeholder='Light name'>" +
           "<input type='text' class='wiz-room-input' value='" + wizEscapeHtml(light.room || "") + "' data-mac='" + wizEscapeHtml(light.mac) + "' placeholder='Room (optional)' data-i18n-placeholder='wiz-room-placeholder'>" +

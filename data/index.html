@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang=nl>
+  <head>
+	<title>Slimme Meter</title>
+
+	<meta charset="UTF-8">
+	<meta name="robots" content="noindex">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+	<!-- Frontend CDN: pioreq2580/ultra-dongle-web@main (always latest on jsDelivr). -->
+	<meta name="msapplication-TileImage" content="https://cdn.jsdelivr.net/gh/mhendriks/P1-Dongel-ESP32@latest/cdn/favicon/ms-icon-310x310.png">
+
+	<script>
+	  window.__CDN_REPO__ = "pioreq2580/ultra-dongle-web";
+	  window.__CDN_REF__  = "main";
+	  window.__CDN_CACHE__ = Date.now();
+	  window.__cdnBase = function () {
+	    return "https://cdn.jsdelivr.net/gh/" + window.__CDN_REPO__ + "@" + window.__CDN_REF__ + "/cdn";
+	  };
+	  window.__cdnUrl = function (file) {
+	    return window.__cdnBase() + "/" + file + "?v=" + window.__CDN_CACHE__;
+	  };
+	</script>
+	<link rel="stylesheet" type="text/css" id="cdn-css">
+    <link href="https://fonts.googleapis.com/css?family=Dosis:400,700" rel="stylesheet">	
+    <link rel="icon" type="image/png" href="https://cdn.jsdelivr.net/gh/mhendriks/P1-Dongel-ESP32@5.8/cdn/favicon/favicon-32x32.png" sizes="32x32" />
+    <link rel="apple-touch-icon" sizes="180x180" href="https://cdn.jsdelivr.net/gh/mhendriks/P1-Dongel-ESP32@latest/cdn/favicon/apple-icon-180x180.png">
+
+	<script src="https://code.iconify.design/1/1.0.7/iconify.min.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.9.4/Chart.min.js"></script>
+	<script type="text/javascript" src="https://cdn.jsdelivr.net/gh/mhendriks/P1-Dongel-ESP32@latest/cdn/chartjs-plugin-labels.min.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/7.0.0/math.min.js" type="text/javascript"></script>
+	<script>
+	  document.getElementById("cdn-css").href = window.__cdnUrl("DSMRindex.css");
+	  [
+	    "cdn-config.js",
+	    "dal.js",
+	    "DSMRgraphics.js",
+	    "DSMRindex.js",
+	    "burnup.js",
+	    "pricecap.js"
+	  ].forEach(function (file) {
+	    document.write('<script src="' + window.__cdnUrl(file) + '"><\/script>');
+	  });
+	</script>
+  </head>
+  <body>
+  	<noscript><strong>Please enable JavaScript to continue.</strong></noscript>
+
+  	<script>
+	  //============================================================================  
+		  window.onload= function() {
+			console.log("window.onload .. ");
+			readPageBody();
+		  }
+	  //============================================================================  
+	  function readPageBody()
+	  {
+		console.log("readPageBody() ..");
+		fetch(window.__cdnUrl("DSMRindex_body.html"))
+		  .then(response => {
+			if (response.ok) {
+			  return response.text();
+			} else {
+			  console.log('Something went wrong');
+			  return "";
+			}
+		  })
+		  .then(text => {
+			document.body.innerHTML = text + document.body.innerHTML;
+			bootsTrapMain();
+		  })
+		  .catch(function(error) {
+			console.log("readPageBody: "+error);
+		  });     
+
+	  } // readPageBody() 
+	  </script>
+  </body>
+</html>

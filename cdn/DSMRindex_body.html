@@ -880,6 +880,7 @@
 		<h1 class="align-c" data-i18n-key="wiz-title">WiZ Lights</h1>
 		<p data-i18n-key="wiz-intro">Discover and control Philips WiZ lights on your LAN (UDP port 38899).</p>
 		<p class="wiz-hint" data-i18n-key="wiz-name-hint">Names come from the bulb moduleName over LAN; WiZ app room names are cloud-only. Rename here as needed.</p>
+		<p class="wiz-hint" data-i18n-key="wiz-local-hint">Enable <strong>Allow local communication</strong> in the WiZ app (Settings → Security) so bulbs respond on the LAN when off.</p>
 		<div class="wiz-toolbar">
 			<label><input type="checkbox" id="wiz_enabled"> <span data-i18n-key="wiz-enabled">Enable WiZ hub</span></label>
 			<label for="wiz_poll" data-i18n-key="wiz-poll-interval">Poll interval (seconds)</label>
@@ -891,6 +892,11 @@
 		</div>
 		<div id="wiz_status" class="wiz-status"></div>
 		<div id="wiz_scan_progress" class="wiz-status"></div>
+		<div class="wiz-probe-row">
+			<label for="wiz_probe_ip" data-i18n-key="wiz-probe-ip-label">Add by IP</label>
+			<input type="text" id="wiz_probe_ip" placeholder="192.168.1.50" class="wiz-probe-input">
+			<button type="button" onclick="wizProbeIp()" data-i18n-key="wiz-btn-probe">Probe</button>
+		</div>
 		<h3 data-i18n-key="wiz-scan-results">Found lights</h3>
 		<table id="wiz_scan_table" class="wiz-table" style="display:none">
 			<thead><tr>
