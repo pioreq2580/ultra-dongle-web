@@ -25,9 +25,9 @@ function Set-CdnPointer {
 window.CDN_REPO = "pioreq2580/ultra-dongle-web";
 window.CDN_REV  = "$Rev";
 window.CDN_PATH = "cdn";
-window.CDN_BASE = `https://cdn.jsdelivr.net/gh/` + window.CDN_REPO + `@` + window.CDN_REV + `/` + window.CDN_PATH;
+window.CDN_BASE = "https://cdn.jsdelivr.net/gh/" + window.CDN_REPO + "@" + window.CDN_REV + "/" + window.CDN_PATH;
 window.cdnAsset = function (file) {
-  return window.CDN_BASE + `/` + file + `?v=` + window.CDN_REV;
+  return window.CDN_BASE + "/" + file + "?v=" + window.CDN_REV;
 };
 "@
   [System.IO.File]::WriteAllText($cdnConfigPath, $cdnConfigBody, $utf8NoBom)
