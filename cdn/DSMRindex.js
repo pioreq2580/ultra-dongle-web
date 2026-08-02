@@ -533,7 +533,10 @@ function heltySave() {
     poll_interval_sec: parseInt(document.getElementById("helty_poll").value, 10) || 30
   };
   heltyApi("/api/v2/helty/config", "POST", payload)
-    .then(() => heltySetStatus("helty_discover_status", "Configuration saved.", false))
+    .then(() => {
+      heltySetStatus("helty_discover_status", "Configuration saved.", false);
+      if (payload.host) heltyTest();
+    })
     .catch(err => heltySetStatus("helty_discover_status", "Save failed: " + err, true));
 }
 
@@ -568,9 +571,6 @@ function heltyPollTestStatus() {
           const hostEl = document.getElementById("helty_host");
           if (hostEl && !hostEl.value.trim()) hostEl.value = json.test_host;
         }
-        // #region agent log
-        heltyDbgLog('DSMRindex.js:heltyPollTestStatus','test ok',{test_host:json.test_host,test_name:json.test_name,enabled:document.getElementById('helty_enabled').checked},'H1');
-        // #endregion
       } else if (json.phase === 4 && json.test_host) {
         clearInterval(heltyTestTimer);
         heltyTestTimer = null;
@@ -632,18 +632,9 @@ function heltyRenderScanResults(results) {
   table.style.display = "";
 }
 
-function heltyDbgLog(location, message, data, hypothesisId) {
-  // #region agent log
-  fetch('http://127.0.0.1:7426/ingest/67ad7ecd-8b16-46de-b055-11bf3bac0fc4',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'159740'},body:JSON.stringify({sessionId:'159740',location:location,message:message,data:data,hypothesisId:hypothesisId,timestamp:Date.now(),runId:'post-fix'})}).catch(()=>{});
-  // #endregion
-}
-
 function heltyPollScanStatus() {
   heltyApi("/api/v2/helty/discover")
     .then(json => {
-      // #region agent log
-      heltyDbgLog('DSMRindex.js:heltyPollScanStatus','discover poll',{phase:json.phase,progress:json.progress,results:(json.results||[]).length,scan_last_host:json.scan_last_host,scan_hosts_checked:json.scan_hosts_checked,scan_tcp_opens:json.scan_tcp_opens,error:json.error||''},'H1');
-      // #endregion
       if (json.phase === 0) {
         heltySetStatus("helty_scan_progress", "Scan queued...", false);
       } else if (json.phase === 1) {
@@ -675,13 +666,16 @@ function heltyPollScanStatus() {
 
 function heltyScan() {
   if (heltyScanTimer) return;
+  const host = document.getElementById("helty_host").value.trim();
+  if (host) {
+    heltySetStatus("helty_scan_progress", "Known IP configured — testing " + host + " instead of scanning subnet.", false);
+    heltyTest();
+    return;
+  }
   heltySetStatus("helty_scan_progress", "Starting network scan...", false);
   document.getElementById("helty_scan_results").style.display = "none";
   heltySetDiscoverButtonsDisabled(true);
   const port = parseInt(document.getElementById("helty_port").value, 10) || 5001;
-  // #region agent log
-  heltyDbgLog('DSMRindex.js:heltyScan','scan start',{port:port,host:document.getElementById('helty_host').value.trim()},'H5');
-  // #endregion
   heltyApi("/api/v2/helty/discover", "POST", { mode: "scan", port })
     .then(() => {
       heltyStopDiscoverPolling();
@@ -708,8 +702,9 @@ function heltyRefresh() {
     if (statusEl) {
       if (!json.enabled) statusEl.textContent = "Hub disabled";
       else if (json.connected) statusEl.textContent = "Connected: " + (json.name || json.host);
+      else if (json.valid) statusEl.textContent = "Stale data: " + (json.name || json.host) + (json.last_poll_age_sec !== undefined ? " (" + json.last_poll_age_sec + "s ago)" : "");
       else statusEl.textContent = "Not connected";
-      statusEl.className = "helty-badge " + (json.connected ? "helty-ok" : "helty-warn");
+      statusEl.className = "helty-badge " + (json.connected ? "helty-ok" : (json.valid ? "helty-warn" : "helty-warn"));
     }
 
     const grid = document.getElementById("helty_telemetry");
@@ -793,8 +788,13 @@ function heltyStopManagePolling() {
 }
 
 function heltyStartDiscover() {
-  fetchHeltyConfig();
-  heltyStopDiscoverPolling();
+  fetchHeltyConfig().then(json => {
+    heltyStopDiscoverPolling();
+    if (json && json.host) {
+      heltySetStatus("helty_discover_status", "Testing configured host " + json.host + "...", false);
+      heltyTest();
+    }
+  });
 }
 
 //entry point 
