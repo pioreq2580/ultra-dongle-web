@@ -491,9 +491,19 @@ let heltyScanTimer = null;
 let heltyScanTimeoutTimer = null;
 let heltyTestTimer = null;
 let heltyCommandTimer = null;
-let heltyManageTimer = null;
+let heltyCommandStartedAt = 0;
+let heltyManagementTimer = null;
+let heltyUiState = { fan_mode: null, led: false };
+let heltyLastCommandPayload = null;
 const HELTY_SCAN_TIMEOUT_MS = 5 * 60 * 1000;
 const HELTY_SCAN_POLL_MS = 1000;
+const HELTY_MANAGEMENT_POLL_MS = 10000;
+const HELTY_CMD_IDLE = 0;
+const HELTY_CMD_RUNNING = 1;
+const HELTY_CMD_DONE = 2;
+const HELTY_CMD_ERROR = 3;
+const HELTY_CMD_POLL_MS = 1000;
+const HELTY_CMD_TIMEOUT_MS = 15000;
 
 function heltyApi(path, method, body) {
   const opts = { method: method || "GET", headers: { "Content-Type": "application/json" } };
@@ -696,71 +706,174 @@ function heltyFormatValue(label, value, unit) {
   return `<div class="helty-card"><div class="helty-card-label">${label}</div><div class="helty-card-value">${value}${unit ? " " + unit : ""}</div></div>`;
 }
 
-function heltyRefresh() {
-  return heltyApi("/api/v2/helty/live").then(json => {
-    const statusEl = document.getElementById("helty_manage_status");
-    if (statusEl) {
-      if (!json.enabled) statusEl.textContent = "Hub disabled";
-      else if (json.connected) statusEl.textContent = "Connected: " + (json.name || json.host);
-      else if (json.valid) statusEl.textContent = "Stale data: " + (json.name || json.host) + (json.last_poll_age_sec !== undefined ? " (" + json.last_poll_age_sec + "s ago)" : "");
-      else statusEl.textContent = "Not connected";
-      statusEl.className = "helty-badge " + (json.connected ? "helty-ok" : (json.valid ? "helty-warn" : "helty-warn"));
-    }
+function heltyEscapeHtml(str) {
+  return String(str || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
 
-    const grid = document.getElementById("helty_telemetry");
-    if (grid) {
-      let html = "";
-      html += heltyFormatValue("Fan mode", json.fan_mode);
-      html += heltyFormatValue("Indoor temp", json.indoor_temperature, "°C");
-      html += heltyFormatValue("Outdoor temp", json.outdoor_temperature, "°C");
-      html += heltyFormatValue("Humidity", json.indoor_humidity, "%");
-      if (json.co2 > 0) html += heltyFormatValue("CO2", json.co2, "ppm");
-      if (json.filter_hours) html += heltyFormatValue("Filter hours", json.filter_hours);
-      if (json.last_poll_age_sec !== undefined) html += heltyFormatValue("Last update", json.last_poll_age_sec, "s ago");
-      grid.innerHTML = html || "<div class=\"helty-status\">No telemetry yet.</div>";
-    }
+function heltyFormatDisplayName(name) {
+  if (!name) return "";
+  return String(name).trim().split(/[\s_]+/).filter(Boolean).map(word => {
+    if (word.length <= 3) return word.toUpperCase();
+    return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+  }).join(" ");
+}
 
-    if (json.fan_mode) document.getElementById("helty_fan_mode").value = json.fan_mode;
-    if (json.led !== undefined) document.getElementById("helty_led").checked = !!json.led;
-    return json;
-  }).catch(err => {
-    heltySetStatus("helty_manage_message", "Refresh failed: " + err, true);
+function heltyBuildDeviceLine(json) {
+  const displayName = heltyFormatDisplayName(json.name);
+  const host = json.host || "";
+  if (displayName && host) return heltyEscapeHtml(displayName) + " · " + heltyEscapeHtml(host);
+  return heltyEscapeHtml(displayName || host);
+}
+
+function heltyUpdateStatusBadge(json) {
+  const statusEl = document.getElementById("helty_status_badge");
+  if (!statusEl) return;
+
+  let stateClass;
+  let icon;
+  let label;
+  let deviceLine = "";
+
+  if (!json.enabled) {
+    stateClass = "helty-warn";
+    icon = "mdi-power-off";
+    label = t("helty-status-hub-disabled");
+  } else if (json.connected) {
+    stateClass = "helty-ok";
+    icon = "mdi-check-circle";
+    label = t("helty-status-online");
+    deviceLine = heltyBuildDeviceLine(json);
+  } else if (json.valid) {
+    stateClass = "helty-warn";
+    icon = "mdi-clock-alert-outline";
+    label = t("helty-status-stale");
+    if (json.last_poll_age_sec !== undefined) label += " (" + json.last_poll_age_sec + "s)";
+    deviceLine = heltyBuildDeviceLine(json);
+  } else {
+    stateClass = "helty-error";
+    icon = "mdi-lan-disconnect";
+    label = t("helty-status-offline");
+    if (json.host) deviceLine = heltyEscapeHtml(json.host);
+  }
+
+  statusEl.className = "helty-status-bar " + stateClass;
+  statusEl.innerHTML =
+    `<span class="iconify helty-status-icon" data-icon="${icon}"></span>` +
+    `<div class="helty-status-text">` +
+      `<div class="helty-status-label">${heltyEscapeHtml(label)}</div>` +
+      (deviceLine ? `<div class="helty-status-device">${deviceLine}</div>` : "") +
+    `</div>`;
+}
+
+function heltyUpdateTelemetryGrid(json) {
+  const grid = document.getElementById("helty_telemetry");
+  if (!grid) return;
+  let html = "";
+  html += heltyFormatValue(t("helty-tx-fan-mode"), json.fan_mode);
+  html += heltyFormatValue(t("helty-tx-indoor-temp"), json.indoor_temperature, "°C");
+  html += heltyFormatValue(t("helty-tx-outdoor-temp"), json.outdoor_temperature, "°C");
+  html += heltyFormatValue(t("helty-tx-humidity"), json.indoor_humidity, "%");
+  if (json.co2 > 0) html += heltyFormatValue(t("helty-tx-co2"), json.co2, "ppm");
+  if (json.voc > 0) html += heltyFormatValue(t("helty-tx-voc"), json.voc, "ppb");
+  if (json.filter_hours) html += heltyFormatValue(t("helty-tx-filter-hours"), json.filter_hours);
+  if (json.last_poll_age_sec !== undefined) html += heltyFormatValue(t("helty-tx-last-update"), json.last_poll_age_sec, "s ago");
+  grid.innerHTML = html || `<div class="helty-status">${t("helty-tx-none")}</div>`;
+}
+
+function heltySeedUiState(json) {
+  if (json.fan_mode) heltyUiState.fan_mode = json.fan_mode;
+  if (json.led !== undefined) heltyUiState.led = !!json.led;
+  heltyRenderControlGrid();
+}
+
+function heltyRenderControlGrid() {
+  const grid = document.getElementById("helty_ctrl_grid");
+  if (!grid) return;
+  grid.querySelectorAll("[data-fan-mode]").forEach(btn => {
+    btn.classList.toggle("helty-ctrl-active", btn.dataset.fanMode === heltyUiState.fan_mode);
+  });
+  const ledBtn = grid.querySelector('[data-action="led"]');
+  if (ledBtn) ledBtn.classList.toggle("helty-ctrl-active", !!heltyUiState.led);
+}
+
+function heltySetControlGridDisabled(disabled) {
+  document.querySelectorAll("#helty_ctrl_grid .helty-ctrl-btn").forEach(btn => {
+    btn.disabled = !!disabled;
   });
 }
 
-function heltyApplyControls() {
-  const payload = {
-    fan_mode: document.getElementById("helty_fan_mode").value,
-    led: document.getElementById("helty_led").checked
-  };
+function heltyRefreshManagement() {
+  const refreshBtn = document.getElementById("helty_refresh_btn");
+  if (refreshBtn) refreshBtn.disabled = true;
+  return heltyApi("/api/v2/helty/live").then(json => {
+    heltyUpdateStatusBadge(json);
+    heltyUpdateTelemetryGrid(json);
+    return json;
+  }).catch(err => {
+    heltySetStatus("helty_manage_message", "Refresh failed: " + err, true);
+  }).finally(() => {
+    if (refreshBtn) refreshBtn.disabled = false;
+  });
+}
+
+function heltySendFanMode(mode) {
+  if (!mode || heltyCommandTimer) return;
+  heltyUiState.fan_mode = mode;
+  heltyRenderControlGrid();
+  const payload = { fan_mode: mode };
+  heltyLastCommandPayload = payload;
   heltyStartCommand(payload, "Command applied.", "Command failed");
 }
 
-function heltyResetFilter() {
-  if (!window.confirm("Reset filter counter on the unit?")) return;
+function heltySendLed() {
+  if (heltyCommandTimer) return;
+  heltyUiState.led = !heltyUiState.led;
+  heltyRenderControlGrid();
+  const payload = { led: heltyUiState.led };
+  heltyLastCommandPayload = payload;
+  heltyStartCommand(payload, "Command applied.", "Command failed");
+}
+
+function heltySendResetFilter() {
+  if (heltyCommandTimer) return;
+  if (!window.confirm(t("helty-reset-filter-confirm") || "Reset filter counter on the unit?")) return;
+  heltyLastCommandPayload = { reset_filter: true };
   heltyStartCommand({ reset_filter: true }, "Filter counter reset.", "Reset failed");
 }
 
+function heltyFinishCommand(successMsg, failureMsg, isError) {
+  if (heltyCommandTimer) clearInterval(heltyCommandTimer);
+  heltyCommandTimer = null;
+  heltyCommandStartedAt = 0;
+  heltySetControlGridDisabled(false);
+  heltySetStatus("helty_manage_message", isError ? failureMsg : successMsg, isError);
+  if (!isError && heltyLastCommandPayload) {
+    if (heltyLastCommandPayload.fan_mode) heltyUiState.fan_mode = heltyLastCommandPayload.fan_mode;
+    if (heltyLastCommandPayload.led !== undefined) heltyUiState.led = heltyLastCommandPayload.led;
+    heltyRenderControlGrid();
+  }
+  heltyLastCommandPayload = null;
+}
+
 function heltyPollCommandStatus(successMsg, failurePrefix) {
+  if (heltyCommandStartedAt && (Date.now() - heltyCommandStartedAt) > HELTY_CMD_TIMEOUT_MS) {
+    heltyFinishCommand(successMsg, failurePrefix + " (timeout)", true);
+    return;
+  }
+
   heltyApi("/api/v2/helty/command")
     .then(json => {
-      if (json.phase === 1) {
+      if (json.phase === HELTY_CMD_RUNNING) {
+        heltySetControlGridDisabled(true);
         heltySetStatus("helty_manage_message", "Sending command...", false);
-      } else if (json.phase === 3 && json.ok) {
-        clearInterval(heltyCommandTimer);
-        heltyCommandTimer = null;
-        heltySetStatus("helty_manage_message", successMsg, false);
-        heltyRefresh();
-      } else if (json.phase === 4 || (json.phase === 3 && !json.ok)) {
-        clearInterval(heltyCommandTimer);
-        heltyCommandTimer = null;
-        heltySetStatus("helty_manage_message", json.error || failurePrefix, true);
+      } else if (json.phase === HELTY_CMD_DONE && json.ok) {
+        heltyFinishCommand(successMsg, json.error || failurePrefix, false);
+      } else if (json.phase === HELTY_CMD_ERROR || (json.phase === HELTY_CMD_DONE && !json.ok)) {
+        heltyFinishCommand(successMsg, json.error || failurePrefix, true);
       }
     })
     .catch(err => {
-      clearInterval(heltyCommandTimer);
-      heltyCommandTimer = null;
-      heltySetStatus("helty_manage_message", failurePrefix + ": " + err, true);
+      heltyFinishCommand(successMsg, failurePrefix + ": " + err, true);
     });
 }
 
@@ -768,23 +881,51 @@ function heltyStartCommand(payload, successMsg, failurePrefix) {
   heltyApi("/api/v2/helty/command", "POST", payload)
     .then(() => {
       if (heltyCommandTimer) clearInterval(heltyCommandTimer);
-      heltyCommandTimer = setInterval(() => heltyPollCommandStatus(successMsg, failurePrefix), 2000);
+      heltyCommandStartedAt = Date.now();
+      heltySetControlGridDisabled(true);
+      heltyCommandTimer = setInterval(() => heltyPollCommandStatus(successMsg, failurePrefix), HELTY_CMD_POLL_MS);
       heltyPollCommandStatus(successMsg, failurePrefix);
     })
-    .catch(err => heltySetStatus("helty_manage_message", failurePrefix + ": " + err, true));
+    .catch(err => {
+      heltySetControlGridDisabled(false);
+      heltySetStatus("helty_manage_message", failurePrefix + ": " + err, true);
+      heltyLastCommandPayload = null;
+    });
 }
 
-function heltyStartManagePolling() {
-  heltyRefresh();
-  if (heltyManageTimer) clearInterval(heltyManageTimer);
-  heltyManageTimer = setInterval(heltyRefresh, 10000);
+function heltyStartManagement() {
+  heltyApi("/api/v2/helty/live")
+    .then(json => {
+      heltySeedUiState(json);
+      heltyUpdateStatusBadge(json);
+      heltyUpdateTelemetryGrid(json);
+    })
+    .catch(err => heltySetStatus("helty_manage_message", "Load failed: " + err, true));
+  heltyRefreshManagement();
+  if (heltyManagementTimer) clearInterval(heltyManagementTimer);
+  heltyManagementTimer = setInterval(heltyRefreshManagement, HELTY_MANAGEMENT_POLL_MS);
 }
 
-function heltyStopManagePolling() {
-  if (heltyManageTimer) {
-    clearInterval(heltyManageTimer);
-    heltyManageTimer = null;
+function heltyStopManagementPolling() {
+  if (heltyManagementTimer) {
+    clearInterval(heltyManagementTimer);
+    heltyManagementTimer = null;
   }
+}
+
+function initHeltyControlGrid() {
+  const grid = document.getElementById("helty_ctrl_grid");
+  if (!grid || grid.dataset.bound) return;
+  grid.dataset.bound = "1";
+  grid.addEventListener("click", event => {
+    const btn = event.target.closest(".helty-ctrl-btn");
+    if (!btn || btn.disabled) return;
+    const mode = btn.dataset.fanMode;
+    const action = btn.dataset.action;
+    if (mode) heltySendFanMode(mode);
+    else if (action === "led") heltySendLed();
+    else if (action === "reset-filter") heltySendResetFilter();
+  });
 }
 
 function heltyStartDiscover() {
@@ -795,6 +936,215 @@ function heltyStartDiscover() {
       heltyTest();
     }
   });
+}
+
+let wizScanTimer = null;
+let wizPageTimer = null;
+let wizConfiguredLights = [];
+
+const WIZ_SCAN_POLL_MS = 1000;
+const WIZ_PAGE_POLL_MS = 10000;
+const WIZ_DISCOVER_SCANNING = 1;
+const WIZ_DISCOVER_DONE = 2;
+const WIZ_DISCOVER_ERROR = 3;
+
+function wizApi(path, method, body) {
+  const opts = { method: method || "GET", headers: { "Content-Type": "application/json" } };
+  if (body !== undefined) opts.body = JSON.stringify(body);
+  return fetch(APIHOST + path, opts).then(async r => {
+    const text = await r.text();
+    if (!r.ok) throw new Error(text || ("HTTP " + r.status));
+    try { return JSON.parse(text); }
+    catch { throw new Error("Invalid JSON from device"); }
+  });
+}
+
+function wizSetStatus(text, isError) {
+  const el = document.getElementById("wiz_status");
+  if (!el) return;
+  el.textContent = text || "";
+  el.className = "wiz-status" + (isError ? " wiz-error" : "");
+}
+
+function wizStopPolling() {
+  if (wizScanTimer) { clearInterval(wizScanTimer); wizScanTimer = null; }
+  if (wizPageTimer) { clearInterval(wizPageTimer); wizPageTimer = null; }
+}
+
+function wizLoadConfig() {
+  return wizApi("/api/v2/wiz/config").then(json => {
+    document.getElementById("wiz_enabled").checked = !!json.enabled;
+    document.getElementById("wiz_poll").value = json.poll_sec || 30;
+    wizConfiguredLights = json.lights || [];
+    return json;
+  });
+}
+
+function wizSaveConfig() {
+  const payload = {
+    enabled: document.getElementById("wiz_enabled").checked,
+    poll_sec: parseInt(document.getElementById("wiz_poll").value, 10) || 30,
+    lights: wizConfiguredLights
+  };
+  return wizApi("/api/v2/wiz/config", "POST", payload)
+    .then(() => wizSetStatus("Configuration saved.", false))
+    .catch(err => wizSetStatus("Save failed: " + err, true));
+}
+
+function wizScan() {
+  wizSetStatus("Scanning network...", false);
+  document.getElementById("wiz_scan_progress").textContent = "";
+  wizApi("/api/v2/wiz/discover", "POST", {})
+    .then(() => {
+      if (wizScanTimer) clearInterval(wizScanTimer);
+      wizScanTimer = setInterval(wizPollScan, WIZ_SCAN_POLL_MS);
+      wizPollScan();
+    })
+    .catch(err => wizSetStatus("Scan failed: " + err, true));
+}
+
+function wizPollScan() {
+  wizApi("/api/v2/wiz/discover")
+    .then(json => {
+      const prog = document.getElementById("wiz_scan_progress");
+      if (json.phase === WIZ_DISCOVER_SCANNING) {
+        prog.textContent = "Scanning... " + (json.progress || 0) + "%";
+      } else if (json.phase === WIZ_DISCOVER_DONE) {
+        if (wizScanTimer) { clearInterval(wizScanTimer); wizScanTimer = null; }
+        prog.textContent = "";
+        wizRenderScanResults(json.results || []);
+        wizSetStatus("Found " + (json.results || []).length + " light(s).", false);
+      } else if (json.phase === WIZ_DISCOVER_ERROR) {
+        if (wizScanTimer) { clearInterval(wizScanTimer); wizScanTimer = null; }
+        wizSetStatus(json.error || "Scan failed", true);
+      }
+    })
+    .catch(err => {
+      if (wizScanTimer) { clearInterval(wizScanTimer); wizScanTimer = null; }
+      wizSetStatus("Scan poll failed: " + err, true);
+    });
+}
+
+function wizRenderScanResults(results) {
+  const table = document.getElementById("wiz_scan_table");
+  const body = document.getElementById("wiz_scan_body");
+  if (!table || !body) return;
+  body.innerHTML = "";
+  if (!results.length) { table.style.display = "none"; return; }
+  table.style.display = "table";
+  const known = new Set((wizConfiguredLights || []).map(l => l.mac));
+  results.forEach(item => {
+    const tr = document.createElement("tr");
+    const already = known.has(item.mac);
+    tr.innerHTML =
+      "<td><input type='checkbox' class='wiz-scan-check' data-mac='" + item.mac + "' data-ip='" + item.ip + "' data-name='" + (item.name || item.mac) + "'" + (already ? " disabled" : "") + "></td>" +
+      "<td>" + (item.name || item.mac) + "</td>" +
+      "<td>" + item.ip + "</td>" +
+      "<td>" + item.mac + "</td>";
+    body.appendChild(tr);
+  });
+}
+
+function wizAddSelected() {
+  const checks = document.querySelectorAll(".wiz-scan-check:checked");
+  if (!checks.length) {
+    wizSetStatus("Select at least one light.", true);
+    return;
+  }
+  const known = new Set((wizConfiguredLights || []).map(l => l.mac));
+  checks.forEach(ch => {
+    const mac = ch.dataset.mac;
+    if (!mac || known.has(mac)) return;
+    wizConfiguredLights.push({
+      mac: mac,
+      ip: ch.dataset.ip || "",
+      name: ch.dataset.name || mac,
+      room: "",
+      enabled: true
+    });
+    known.add(mac);
+  });
+  wizSaveConfig().then(() => wizRefreshLights());
+}
+
+function wizRefreshLights() {
+  return wizApi("/api/v2/wiz/lights")
+    .then(json => {
+      wizConfiguredLights = (json.lights || []).map(l => ({
+        mac: l.mac, ip: l.ip, name: l.name, room: l.room || "", enabled: l.enabled !== false
+      }));
+      wizRenderLightGrid(json.lights || []);
+    })
+    .catch(err => wizSetStatus("Load failed: " + err, true));
+}
+
+function wizRenderLightGrid(lights) {
+  const grid = document.getElementById("wiz_light_grid");
+  if (!grid) return;
+  grid.innerHTML = "";
+  if (!lights.length) {
+    grid.innerHTML = "<p class='wiz-empty' data-i18n-key='wiz-no-lights'>No lights configured yet. Scan and add bulbs above.</p>";
+    return;
+  }
+  lights.forEach(light => {
+    const card = document.createElement("div");
+    card.className = "wiz-card" + (light.online ? " wiz-online" : " wiz-offline");
+    const dimPct = Math.round((light.dimming || 0) * 100 / 255);
+    card.innerHTML =
+      "<div class='wiz-card-head'>" +
+        "<span class='wiz-badge'>" + (light.online ? "online" : "offline") + "</span>" +
+        "<input type='text' class='wiz-name-input' value='" + (light.name || light.mac).replace(/'/g, "&#39;") + "' data-mac='" + light.mac + "'>" +
+        "<button type='button' class='wiz-remove' data-mac='" + light.mac + "' title='Remove'>&times;</button>" +
+      "</div>" +
+      "<div class='wiz-card-meta'>" + light.ip + " · " + light.mac + "</div>" +
+      "<div class='wiz-card-controls'>" +
+        "<label><input type='checkbox' class='wiz-toggle' data-mac='" + light.mac + "'" + (light.on ? " checked" : "") + "> On</label>" +
+        "<input type='range' min='0' max='100' value='" + dimPct + "' class='wiz-dim' data-mac='" + light.mac + "'>" +
+        "<span class='wiz-dim-label'>" + dimPct + "%</span>" +
+      "</div>";
+    grid.appendChild(card);
+  });
+
+  grid.querySelectorAll(".wiz-toggle").forEach(el => {
+    el.addEventListener("change", () => wizSendCommand({ mac: el.dataset.mac, on: el.checked }));
+  });
+  grid.querySelectorAll(".wiz-dim").forEach(el => {
+    el.addEventListener("change", () => {
+      const pct = parseInt(el.value, 10) || 0;
+      el.parentElement.querySelector(".wiz-dim-label").textContent = pct + "%";
+      wizSendCommand({ mac: el.dataset.mac, on: true, dimming: Math.round(pct * 255 / 100) });
+    });
+  });
+  grid.querySelectorAll(".wiz-remove").forEach(el => {
+    el.addEventListener("click", () => {
+      wizConfiguredLights = wizConfiguredLights.filter(l => l.mac !== el.dataset.mac);
+      wizSaveConfig().then(() => wizRefreshLights());
+    });
+  });
+  grid.querySelectorAll(".wiz-name-input").forEach(el => {
+    el.addEventListener("change", () => {
+      const item = wizConfiguredLights.find(l => l.mac === el.dataset.mac);
+      if (item) item.name = el.value.trim() || item.mac;
+      wizSaveConfig();
+    });
+  });
+}
+
+function wizSendCommand(payload) {
+  return wizApi("/api/v2/wiz/command", "POST", payload).catch(err => wizSetStatus("Command failed: " + err, true));
+}
+
+function wizAllCommand(on) {
+  wizSendCommand({ all: true, on: on }).then(() => setTimeout(wizRefreshLights, 800));
+}
+
+function wizStartPage() {
+  wizStopPolling();
+  wizLoadConfig()
+    .then(() => wizRefreshLights())
+    .catch(err => wizSetStatus("Config load failed: " + err, true));
+  if (wizPageTimer) clearInterval(wizPageTimer);
+  wizPageTimer = setInterval(wizRefreshLights, WIZ_PAGE_POLL_MS);
 }
 
 //entry point 
@@ -1761,6 +2111,7 @@ function bootsTrapMain()
 			openTab();
 		}
     document.getElementById('dongle_io').addEventListener('input', NTSWupdateVisibility);
+ 	initHeltyControlGrid();
  	
  	BurnupBootstrap();
  	
@@ -1982,7 +2333,8 @@ function SendNetSwitchJson() {
     document.body.classList.remove("menu-open");
     clearInterval(tabTimer);  
     clearInterval(NRGStatusTimer);
-    heltyStopManagePolling();
+    heltyStopManagementPolling();
+    wizStopPolling();
 	if (objDAL) {
 		objDAL.stopDashLivePolling();
 		objDAL.stopDashHistPolling();
@@ -2046,8 +2398,11 @@ function SendNetSwitchJson() {
 		case "bHeltyDiscover":
 			heltyStartDiscover();
 			break;
-		case "bHeltyManage":
-			heltyStartManagePolling();
+		case "bHeltyManagement":
+			heltyStartManagement();
+			break;
+		case "bWizLights":
+			wizStartPage();
 			break;
     }
   } // openTab()
@@ -4786,7 +5141,12 @@ const FALLBACK_TRANSLATIONS = {
     "lbl-history-order-new-to-old-short": "nieuw→oud",
     "lbl-history-order-old-to-new-short": "oud→nieuw",
     "tip-history-graph-new-to-old": "X-as: nieuw naar oud. Klik voor oud naar nieuw.",
-    "tip-history-graph-old-to-new": "X-as: oud naar nieuw. Klik voor nieuw naar oud."
+    "tip-history-graph-old-to-new": "X-as: oud naar nieuw. Klik voor nieuw naar oud.",
+    "helty-status-online": "Online",
+    "helty-status-offline": "Offline",
+    "helty-status-stale": "Verouderde gegevens",
+    "helty-status-hub-disabled": "Hub uitgeschakeld",
+    "helty-btn-refresh": "Vernieuwen"
   },
   en: {
     "net-action-on": "Switch action",
@@ -4806,7 +5166,12 @@ const FALLBACK_TRANSLATIONS = {
     "lbl-history-order-new-to-old-short": "new→old",
     "lbl-history-order-old-to-new-short": "old→new",
     "tip-history-graph-new-to-old": "X-axis: newest to oldest. Click for oldest to newest.",
-    "tip-history-graph-old-to-new": "X-axis: oldest to newest. Click for newest to oldest."
+    "tip-history-graph-old-to-new": "X-axis: oldest to newest. Click for newest to oldest.",
+    "helty-status-online": "Online",
+    "helty-status-offline": "Offline",
+    "helty-status-stale": "Stale data",
+    "helty-status-hub-disabled": "Hub disabled",
+    "helty-btn-refresh": "Refresh"
   },
   de: {
     "net-action-on": "Schaltaktion",
@@ -4826,7 +5191,12 @@ const FALLBACK_TRANSLATIONS = {
     "lbl-history-order-new-to-old-short": "neu→alt",
     "lbl-history-order-old-to-new-short": "alt→neu",
     "tip-history-graph-new-to-old": "X-Achse: neu nach alt. Klicken fur alt nach neu.",
-    "tip-history-graph-old-to-new": "X-Achse: alt nach neu. Klicken fur neu nach alt."
+    "tip-history-graph-old-to-new": "X-Achse: alt nach neu. Klicken fur neu nach alt.",
+    "helty-status-online": "Online",
+    "helty-status-offline": "Offline",
+    "helty-status-stale": "Veraltete Daten",
+    "helty-status-hub-disabled": "Hub deaktiviert",
+    "helty-btn-refresh": "Aktualisieren"
   },
   se: {
     "net-action-on": "Växlingsåtgärd",
@@ -4846,7 +5216,12 @@ const FALLBACK_TRANSLATIONS = {
     "lbl-history-order-new-to-old-short": "ny→gammal",
     "lbl-history-order-old-to-new-short": "gammal→ny",
     "tip-history-graph-new-to-old": "X-axel: nyast till aldst. Klicka for aldst till nyast.",
-    "tip-history-graph-old-to-new": "X-axel: aldst till nyast. Klicka for nyast till aldst."
+    "tip-history-graph-old-to-new": "X-axel: aldst till nyast. Klicka for nyast till aldst.",
+    "helty-status-online": "Online",
+    "helty-status-offline": "Offline",
+    "helty-status-stale": "Föråldrad data",
+    "helty-status-hub-disabled": "Hubb inaktiverad",
+    "helty-btn-refresh": "Uppdatera"
   }
 };
 const URL_I18N = typeof DEBUG !== 'undefined' && DEBUG

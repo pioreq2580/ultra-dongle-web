@@ -30,8 +30,9 @@
 	  <li><a id='bHeltyTab'       data-i18n-key="mnu-helty" href="javascript:void(0);">Air Guard</a>
         <ul>
           <li><a id='bHeltyDiscover' data-i18n-key="mnu-helty-discover" class='tabButton nav-item' href="#HeltyDiscover">Discover</a></li>
-          <li><a id='bHeltyManage'   data-i18n-key="mnu-helty-manage" class='tabButton nav-item' href="#HeltyManage">Manage</a></li>
+          <li><a id='bHeltyManagement' data-i18n-key="mnu-helty-management" class='tabButton nav-item' href="#HeltyManagement">Management</a></li>
         </ul></li>
+	  <li><a id='bWizLights' data-i18n-key="mnu-wiz" class='tabButton nav-item' href="#WizLights">Lights</a></li>
 	  	  
       <li><a id='bHoursTab'     data-i18n-key="mnu-hour" class='tabButton nav-item' href="#HoursTab" >Uur</a></li>
       <li><a id='bDaysTab'      data-i18n-key="mnu-day" class='tabButton nav-item' href="#DaysTab" >Dag</a></li>
@@ -789,7 +790,7 @@
     </section>  
 
 	<section id="HeltyDiscover" class="tabName">
-		<div class="helty-panel">
+		<div id="eid-setup">
 		<h1 class="align-c" data-i18n-key="helty-discover-title">Air Guard Discover</h1>
 		<p data-i18n-key="helty-discover-intro">Connect one Helty Air Guard unit on your LAN (TCP port 5001).</p>
 		<hr>
@@ -815,31 +816,96 @@
 		</div>
     </section>
 
-	<section id="HeltyManage" class="tabName">
-		<div class="helty-panel">
-		<h1 class="align-c" data-i18n-key="helty-manage-title">Air Guard Manage</h1>
-		<div id="helty_manage_status" class="helty-badge">...</div>
+	<section id="HeltyManagement" class="tabName">
+		<div id="eid-setup">
+		<h1 class="align-c" data-i18n-key="helty-management-title">Air Guard Management</h1>
+		<div class="helty-status-header">
+			<div id="helty_status_badge" class="helty-status-bar">...</div>
+			<button type="button" id="helty_refresh_btn" onclick="heltyRefreshManagement()">
+				<span class="iconify" data-icon="mdi-refresh"></span>
+				<span data-i18n-key="helty-btn-refresh">Refresh</span>
+			</button>
+		</div>
 		<div id="helty_telemetry" class="helty-grid"></div>
 		<hr>
-		<h3 data-i18n-key="helty-controls">Controls</h3>
-		<label for="helty_fan_mode" data-i18n-key="helty-fan-mode">Fan mode</label><br>
-		<select id="helty_fan_mode">
-			<option value="OFF">OFF</option>
-			<option value="LOW">LOW</option>
-			<option value="MEDIUM">MEDIUM</option>
-			<option value="HIGH">HIGH</option>
-			<option value="MAX">MAX</option>
-			<option value="BOOST">BOOST</option>
-			<option value="NIGHT">NIGHT</option>
-			<option value="FREE_COOLING">FREE_COOLING</option>
-		</select><br><br>
-		<label><input type="checkbox" id="helty_led"> <span data-i18n-key="helty-led">Front LED</span></label><br><br>
-		<div class="helty-actions align-c">
-			<button type="button" onclick="heltyApplyControls()" data-i18n-key="helty-btn-apply">Apply</button>
-			<button type="button" onclick="heltyResetFilter()" data-i18n-key="helty-btn-reset-filter">Reset filter</button>
-			<button type="button" onclick="heltyRefresh()" data-i18n-key="helty-btn-refresh">Refresh</button>
+		<h3 class="helty-section-title"><span class="iconify" data-icon="mdi-tune-variant"></span> <span data-i18n-key="helty-controls">Controls</span></h3>
+		<div id="helty_ctrl_grid" class="helty-ctrl-grid">
+			<button type="button" class="helty-ctrl-btn" data-fan-mode="LOW">
+				<span class="iconify helty-ctrl-icon" data-icon="mdi-fan-speed-1"></span>
+				<span class="helty-ctrl-label" data-i18n-key="helty-ctrl-low">Low</span>
+			</button>
+			<button type="button" class="helty-ctrl-btn" data-fan-mode="MEDIUM">
+				<span class="iconify helty-ctrl-icon" data-icon="mdi-fan-speed-2"></span>
+				<span class="helty-ctrl-label" data-i18n-key="helty-ctrl-medium">Medium</span>
+			</button>
+			<button type="button" class="helty-ctrl-btn" data-fan-mode="HIGH">
+				<span class="iconify helty-ctrl-icon" data-icon="mdi-fan-speed-3"></span>
+				<span class="helty-ctrl-label" data-i18n-key="helty-ctrl-high">High</span>
+			</button>
+			<button type="button" class="helty-ctrl-btn" data-fan-mode="MAX">
+				<span class="iconify helty-ctrl-icon" data-icon="mdi-fan-speed-4"></span>
+				<span class="helty-ctrl-label" data-i18n-key="helty-ctrl-max">Max</span>
+			</button>
+			<button type="button" class="helty-ctrl-btn" data-fan-mode="BOOST">
+				<span class="iconify helty-ctrl-icon" data-icon="mdi-fan-plus"></span>
+				<span class="helty-ctrl-label" data-i18n-key="helty-ctrl-boost">Hypervent.</span>
+			</button>
+			<button type="button" class="helty-ctrl-btn" data-fan-mode="NIGHT">
+				<span class="iconify helty-ctrl-icon" data-icon="mdi-weather-night"></span>
+				<span class="helty-ctrl-label" data-i18n-key="helty-ctrl-night">Night</span>
+			</button>
+			<button type="button" class="helty-ctrl-btn" data-fan-mode="FREE_COOLING">
+				<span class="iconify helty-ctrl-icon" data-icon="mdi-waves"></span>
+				<span class="helty-ctrl-label" data-i18n-key="helty-ctrl-freecooling">Freecooling</span>
+			</button>
+			<button type="button" class="helty-ctrl-btn" data-fan-mode="OFF">
+				<span class="iconify helty-ctrl-icon" data-icon="mdi-power"></span>
+				<span class="helty-ctrl-label" data-i18n-key="helty-ctrl-off">HRV Off</span>
+			</button>
+			<button type="button" class="helty-ctrl-btn" data-action="led">
+				<span class="iconify helty-ctrl-icon" data-icon="mdi-lightbulb-outline"></span>
+				<span class="helty-ctrl-label" data-i18n-key="helty-ctrl-led">LED</span>
+			</button>
+			<button type="button" class="helty-ctrl-btn" data-action="reset-filter">
+				<span class="iconify helty-ctrl-icon" data-icon="mdi-filter-outline"></span>
+				<span class="helty-ctrl-label" data-i18n-key="helty-ctrl-reset-filter">Reset filter</span>
+			</button>
 		</div>
 		<div id="helty_manage_message" class="helty-status"></div>
+		</div>
+    </section>
+
+	<section id="WizLights" class="tabName">
+		<div id="eid-setup" class="wiz-panel">
+		<h1 class="align-c" data-i18n-key="wiz-title">WiZ Lights</h1>
+		<p data-i18n-key="wiz-intro">Discover and control Philips WiZ lights on your LAN (UDP port 38899).</p>
+		<div class="wiz-toolbar">
+			<label><input type="checkbox" id="wiz_enabled"> <span data-i18n-key="wiz-enabled">Enable WiZ hub</span></label>
+			<label for="wiz_poll" data-i18n-key="wiz-poll-interval">Poll interval (seconds)</label>
+			<input type="number" id="wiz_poll" value="30" min="10" style="width:80px">
+			<button type="button" onclick="wizSaveConfig()" data-i18n-key="btn-save">Save</button>
+			<button type="button" onclick="wizScan()" data-i18n-key="wiz-btn-scan">Scan network</button>
+			<button type="button" onclick="wizAllCommand(false)" data-i18n-key="wiz-btn-all-off">All off</button>
+			<button type="button" onclick="wizAllCommand(true)" data-i18n-key="wiz-btn-all-on">All on</button>
+		</div>
+		<div id="wiz_status" class="wiz-status"></div>
+		<div id="wiz_scan_progress" class="wiz-status"></div>
+		<h3 data-i18n-key="wiz-scan-results">Found lights</h3>
+		<table id="wiz_scan_table" class="wiz-table" style="display:none">
+			<thead><tr>
+				<th></th>
+				<th data-i18n-key="wiz-col-name">Name</th>
+				<th data-i18n-key="wiz-col-ip">IP</th>
+				<th data-i18n-key="wiz-col-mac">MAC</th>
+			</tr></thead>
+			<tbody id="wiz_scan_body"></tbody>
+		</table>
+		<div class="wiz-actions align-c">
+			<button type="button" onclick="wizAddSelected()" data-i18n-key="wiz-btn-add-selected">Add selected</button>
+		</div>
+		<hr>
+		<h3 data-i18n-key="wiz-my-lights">My lights</h3>
+		<div id="wiz_light_grid" class="wiz-grid"></div>
 		</div>
     </section>
 
