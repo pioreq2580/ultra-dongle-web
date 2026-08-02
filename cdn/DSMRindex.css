@@ -1624,6 +1624,30 @@ select#languageSelector {background-color: unset; color: #fff; border: none;colo
   border-top: 1px solid rgba(0,0,0,0.08);
 }
 
+.wiz-cct-controls {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(0,0,0,0.08);
+}
+
+.wiz-cct-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: #555;
+}
+
+.wiz-cct-label input[type="range"] {
+  width: 100%;
+}
+
+.wiz-temp-label {
+  font-weight: 600;
+  color: #333;
+  text-align: center;
+}
+
 .wiz-color-picker {
   display: flex;
   flex-direction: column;
@@ -1634,19 +1658,28 @@ select#languageSelector {background-color: unset; color: #fff; border: none;colo
 .wiz-color-wrap {
   display: block;
   cursor: pointer;
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  padding: 3px;
+  background:
+    repeating-conic-gradient(rgba(0,0,0,0.08) 0% 25%, transparent 0% 50%) 50% / 10px 10px,
+    #f4f4f4;
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.12), 0 1px 4px rgba(0,0,0,0.12);
+  overflow: hidden;
 }
 
 .wiz-color {
   -webkit-appearance: none;
   appearance: none;
-  width: 72px;
-  height: 72px;
+  display: block;
+  width: 100%;
+  height: 100%;
   padding: 0;
-  border: 3px solid rgba(0,0,0,0.12);
+  border: 2px solid rgba(0,0,0,0.2);
   border-radius: 50%;
   cursor: pointer;
   background: transparent;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.12);
 }
 
 .wiz-color::-webkit-color-swatch-wrapper {
