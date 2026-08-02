@@ -488,9 +488,12 @@ function SolarSendData() {
 }
 
 let heltyScanTimer = null;
+let heltyScanTimeoutTimer = null;
 let heltyTestTimer = null;
 let heltyCommandTimer = null;
 let heltyManageTimer = null;
+const HELTY_SCAN_TIMEOUT_MS = 5 * 60 * 1000;
+const HELTY_SCAN_POLL_MS = 1000;
 
 function heltyApi(path, method, body) {
   const opts = { method: method || "GET", headers: { "Content-Type": "application/json" } };
@@ -573,6 +576,33 @@ function heltyPollTestStatus() {
     });
 }
 
+function heltySetDiscoverButtonsDisabled(disabled) {
+  document.querySelectorAll("#HeltyDiscover button").forEach(btn => {
+    btn.disabled = !!disabled;
+  });
+}
+
+function heltyStopDiscoverPolling() {
+  if (heltyScanTimer) {
+    clearInterval(heltyScanTimer);
+    heltyScanTimer = null;
+  }
+  if (heltyScanTimeoutTimer) {
+    clearTimeout(heltyScanTimeoutTimer);
+    heltyScanTimeoutTimer = null;
+  }
+  if (heltyTestTimer) {
+    clearInterval(heltyTestTimer);
+    heltyTestTimer = null;
+  }
+  heltySetDiscoverButtonsDisabled(false);
+}
+
+function heltyFinishScan(message, isError) {
+  heltyStopDiscoverPolling();
+  heltySetStatus("helty_scan_progress", message, isError);
+}
+
 function heltyRenderScanResults(results) {
   const table = document.getElementById("helty_scan_results");
   const body = document.getElementById("helty_scan_results_body");
@@ -597,36 +627,48 @@ function heltyRenderScanResults(results) {
 function heltyPollScanStatus() {
   heltyApi("/api/v2/helty/discover")
     .then(json => {
-      if (json.phase === 2) {
+      if (json.phase === 0) {
+        heltySetStatus("helty_scan_progress", "Scan queued...", false);
+      } else if (json.phase === 1) {
+        heltyFinishScan("Helty client busy (test or poll in progress)", true);
+      } else if (json.phase === 2) {
         heltySetStatus("helty_scan_progress", "Scanning... " + (json.progress || 0) + "%", false);
       } else if (json.phase === 3) {
-        clearInterval(heltyScanTimer);
-        heltyScanTimer = null;
-        heltySetStatus("helty_scan_progress", "Scan complete.", false);
-        heltyRenderScanResults(json.results || []);
+        const results = json.results || [];
+        heltyFinishScan(
+          results.length
+            ? "Scan complete."
+            : "Scan complete — no Air Guard devices found on this subnet.",
+          false
+        );
+        heltyRenderScanResults(results);
       } else if (json.phase === 4) {
-        clearInterval(heltyScanTimer);
-        heltyScanTimer = null;
-        heltySetStatus("helty_scan_progress", json.error || "Scan failed", true);
+        heltyFinishScan(json.error || "Scan failed", true);
       }
     })
     .catch(err => {
-      clearInterval(heltyScanTimer);
-      heltyScanTimer = null;
-      heltySetStatus("helty_scan_progress", "Scan status failed: " + err, true);
+      heltyFinishScan("Scan status failed: " + err, true);
     });
 }
 
 function heltyScan() {
+  if (heltyScanTimer) return;
   heltySetStatus("helty_scan_progress", "Starting network scan...", false);
   document.getElementById("helty_scan_results").style.display = "none";
+  heltySetDiscoverButtonsDisabled(true);
   heltyApi("/api/v2/helty/discover", "POST", { mode: "scan", port: parseInt(document.getElementById("helty_port").value, 10) || 5001 })
     .then(() => {
-      if (heltyScanTimer) clearInterval(heltyScanTimer);
-      heltyScanTimer = setInterval(heltyPollScanStatus, 2000);
+      heltyStopDiscoverPolling();
+      heltySetDiscoverButtonsDisabled(true);
+      heltyScanTimer = setInterval(heltyPollScanStatus, HELTY_SCAN_POLL_MS);
       heltyPollScanStatus();
+      heltyScanTimeoutTimer = setTimeout(() => {
+        if (heltyScanTimer) heltyFinishScan("Scan timed out", true);
+      }, HELTY_SCAN_TIMEOUT_MS);
     })
-    .catch(err => heltySetStatus("helty_scan_progress", "Scan start failed: " + err, true));
+    .catch(err => {
+      heltyFinishScan("Scan start failed: " + err, true);
+    });
 }
 
 function heltyFormatValue(label, value, unit) {
@@ -726,10 +768,7 @@ function heltyStopManagePolling() {
 
 function heltyStartDiscover() {
   fetchHeltyConfig();
-  if (heltyScanTimer) {
-    clearInterval(heltyScanTimer);
-    heltyScanTimer = null;
-  }
+  heltyStopDiscoverPolling();
 }
 
 //entry point 

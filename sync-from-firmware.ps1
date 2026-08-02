@@ -15,8 +15,9 @@ function Set-CdnPointer {
 
   $cdnConfigPath = Join-Path $TargetRoot "cdn\cdn-config.js"
   $edgePath = Join-Path $TargetRoot "data\DSMRindexEDGE.html"
+  $utf8NoBom = New-Object System.Text.UTF8Encoding $false
 
-  @"
+  $cdnConfigBody = @"
 // Single source of truth for the frontend CDN location.
 // Public repo: pioreq2580/ultra-dongle-web (synced from private ultra-dongle firmware).
 // CDN_REV is a git commit SHA (not "main") so jsDelivr serves updates immediately.
@@ -28,7 +29,8 @@ window.CDN_BASE = `https://cdn.jsdelivr.net/gh/` + window.CDN_REPO + `@` + windo
 window.cdnAsset = function (file) {
   return window.CDN_BASE + `/` + file + `?v=` + window.CDN_REV;
 };
-"@ | Set-Content -Encoding utf8 $cdnConfigPath
+"@
+  [System.IO.File]::WriteAllText($cdnConfigPath, $cdnConfigBody, $utf8NoBom)
 
   if (Test-Path $edgePath) {
     $edge = Get-Content -Raw $edgePath
