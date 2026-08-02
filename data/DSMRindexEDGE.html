@@ -52,10 +52,9 @@
 	  function readPageBody()
 	  {
 		console.log("readPageBody() ..");
-		const cdnRev = (typeof CDN_REV !== "undefined") ? CDN_REV : window.__CDN_REV__;
-		const cdnBase = (typeof CDN_BASE !== "undefined")
-		  ? CDN_BASE
-		  : "https://cdn.jsdelivr.net/gh/" + window.__CDN_REPO__ + "@" + cdnRev + "/cdn";
+		// Device shell __CDN_REV__ is authoritative; cdn-config.js may pin a stale amended commit.
+		const cdnRev = window.__CDN_REV__ || window.CDN_REV || ((typeof CDN_REV !== "undefined") ? CDN_REV : "main");
+		const cdnBase = "https://cdn.jsdelivr.net/gh/" + window.__CDN_REPO__ + "@" + cdnRev + "/cdn";
 		fetch(cdnBase + "/DSMRindex_body.html?v=" + cdnRev)
 		  .then(response => {
 			if (response.ok) {
