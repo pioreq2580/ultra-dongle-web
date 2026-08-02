@@ -1006,13 +1006,24 @@ function wizIsMockLight(light) {
 
 function wizLightIsRgb(light) {
   if (!light) return false;
-  if (typeof light.rgb === "boolean") return light.rgb;
+  if (typeof light.cct === "boolean" && light.cct && light.rgb === false) return false;
+  if (typeof light.rgb === "boolean") {
+    if (!light.rgb) return false;
+    // Legacy firmware: ESP24_SHRGB reports rgb from module name but getPilot only has temp.
+    const name = String(light.module_name || light.name || "");
+    if (/ESP24_SHRGB/i.test(name)) return false;
+    if (light.temp && light.r === undefined && light.g === undefined && light.b === undefined) return false;
+    return true;
+  }
   return false;
 }
 
 function wizLightIsCct(light) {
   if (!light) return false;
   if (typeof light.cct === "boolean") return light.cct;
+  if (light.temp) return true;
+  const name = String(light.module_name || light.name || "");
+  if (/ESP24_SHRGB/i.test(name)) return true;
   return false;
 }
 
