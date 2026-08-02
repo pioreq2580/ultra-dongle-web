@@ -175,7 +175,7 @@
   "wiz-scan-none": "Scan complete — no WiZ lights found on this subnet.",
   "wiz-status-online": "online",
   "wiz-status-off": "off",
-  "wiz-status-offline": "offline"
+  "wiz-status-offline": "offline",
   "lbl-advance": "Voorschot Bedrag",
   "lbl-mth-from-net": "Afname ",
   "lbl-mth-current": " deze periode",

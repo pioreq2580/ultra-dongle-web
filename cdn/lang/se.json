@@ -145,7 +145,7 @@
   "wiz-scan-none": "Scan complete — no WiZ lights found on this subnet.",
   "wiz-status-online": "online",
   "wiz-status-off": "off",
-  "wiz-status-offline": "offline"
+  "wiz-status-offline": "offline",
   "tle-hours": "Föregående timmar",
   "btn-save": "Spara",
   "btn-undo": "Ångra",
