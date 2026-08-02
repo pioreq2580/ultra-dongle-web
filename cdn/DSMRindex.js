@@ -941,13 +941,15 @@ function heltyStartDiscover() {
 let wizScanTimer = null;
 let wizPageTimer = null;
 let wizConfiguredLights = [];
+let wizPollSec = 30;
 
 const WIZ_SCAN_POLL_MS = 1000;
-const WIZ_PAGE_POLL_MS = 10000;
+const WIZ_PAGE_POLL_MS = 15000;
 const WIZ_SCAN_TIMEOUT_MS = 120000;
 const WIZ_DISCOVER_SCANNING = 1;
 const WIZ_DISCOVER_DONE = 2;
 const WIZ_DISCOVER_ERROR = 3;
+const WIZ_MOCK_MAC = "aabbccddeeff";
 
 function wizApi(path, method, body) {
   const opts = { method: method || "GET", headers: { "Content-Type": "application/json" } };
@@ -987,6 +989,26 @@ function wizMetaLine(light) {
   return parts.join(" · ");
 }
 
+function wizIsMockLight(light) {
+  if (!light) return true;
+  const mac = String(light.mac || "").toLowerCase();
+  if (mac === WIZ_MOCK_MAC) return true;
+  const label = String(light.name || light.module_name || "");
+  return /mock/i.test(label);
+}
+
+function wizLightIsRgb(light) {
+  if (!light) return false;
+  if (light.rgb) return true;
+  const name = String(light.module_name || light.name || "").toUpperCase();
+  return name.includes("SHRGB") || name.includes("RGB");
+}
+
+function wizSetInputValue(el, value) {
+  if (!el || document.activeElement === el) return;
+  el.value = value;
+}
+
 function wizSetStatus(text, isError) {
   const el = document.getElementById("wiz_status");
   if (!el) return;
@@ -999,11 +1021,21 @@ function wizStopPolling() {
   if (wizPageTimer) { clearInterval(wizPageTimer); wizPageTimer = null; }
 }
 
+function wizPagePollMs() {
+  const sec = Math.max(10, parseInt(wizPollSec, 10) || 30);
+  return sec * 1000;
+}
+
+function wizShouldPoll() {
+  return activeTab === "bWizLights" && document.visibilityState === "visible";
+}
+
 function wizLoadConfig() {
   return wizApi("/api/v2/wiz/config").then(json => {
     document.getElementById("wiz_enabled").checked = !!json.enabled;
     document.getElementById("wiz_poll").value = json.poll_sec || 30;
-    wizConfiguredLights = json.lights || [];
+    wizPollSec = json.poll_sec || 30;
+    wizConfiguredLights = (json.lights || []).filter(l => !wizIsMockLight(l));
     return json;
   });
 }
@@ -1012,7 +1044,7 @@ function wizSaveConfig() {
   const payload = {
     enabled: document.getElementById("wiz_enabled").checked,
     poll_sec: parseInt(document.getElementById("wiz_poll").value, 10) || 30,
-    lights: wizConfiguredLights
+    lights: wizConfiguredLights.filter(l => !wizIsMockLight(l))
   };
   return wizApi("/api/v2/wiz/config", "POST", payload)
     .then(() => wizSetStatus("Configuration saved.", false))
@@ -1081,18 +1113,20 @@ function wizProbeIp() {
 }
 
 function wizPollScan() {
+  if (!wizShouldPoll()) return;
   wizApi("/api/v2/wiz/discover")
     .then(json => {
       const prog = document.getElementById("wiz_scan_progress");
       if (json.phase === WIZ_DISCOVER_SCANNING) {
-        const partial = json.results || [];
+        const partial = (json.results || []).filter(item => !wizIsMockLight(item));
         if (partial.length) wizRenderScanResults(partial);
         prog.textContent = wizScanProgressText(json);
       } else if (json.phase === WIZ_DISCOVER_DONE) {
         if (wizScanTimer) { clearInterval(wizScanTimer); wizScanTimer = null; }
         prog.textContent = "";
-        wizRenderScanResults(json.results || []);
-        const n = (json.results || []).length;
+        const results = (json.results || []).filter(item => !wizIsMockLight(item));
+        wizRenderScanResults(results);
+        const n = results.length;
         wizSetStatus(n
           ? ((typeof t === "function" ? t("wiz-scan-done") : "Found") + " " + n + " light(s).")
           : (typeof t === "function" ? t("wiz-scan-none") : "Scan complete — no WiZ lights found on this subnet."), false);
@@ -1138,7 +1172,7 @@ function wizAddSelected() {
   const known = new Set((wizConfiguredLights || []).map(l => l.mac));
   checks.forEach(ch => {
     const mac = ch.dataset.mac;
-    if (!mac || known.has(mac)) return;
+    if (!mac || known.has(mac) || mac === WIZ_MOCK_MAC) return;
     wizConfiguredLights.push({
       mac: mac,
       ip: ch.dataset.ip || "",
@@ -1152,127 +1186,219 @@ function wizAddSelected() {
 }
 
 function wizRefreshLights() {
+  if (!wizShouldPoll()) return Promise.resolve();
   return wizApi("/api/v2/wiz/lights")
     .then(json => {
-      wizConfiguredLights = (json.lights || []).map(l => ({
-        mac: l.mac, ip: l.ip, name: l.name, room: l.room || "", enabled: l.enabled !== false
-      }));
-      wizRenderLightGrid(json.lights || []);
+      wizPollSec = json.poll_sec || wizPollSec;
+      wizConfiguredLights = (json.lights || [])
+        .filter(l => !wizIsMockLight(l))
+        .map(l => ({
+          mac: l.mac, ip: l.ip, name: l.name, room: l.room || "", enabled: l.enabled !== false
+        }));
+      wizRenderLightGrid((json.lights || []).filter(l => !wizIsMockLight(l)));
     })
     .catch(err => wizSetStatus("Load failed: " + err, true));
+}
+
+function wizBuildRgbHtml(light) {
+  if (!wizLightIsRgb(light)) return "";
+  const swatch = wizRgbToHex(light.r, light.g, light.b);
+  return (
+    "<div class='wiz-rgb-controls' data-mac='" + wizEscapeHtml(light.mac) + "'>" +
+      "<label class='wiz-color-wrap'>" +
+        "<span data-i18n-key='wiz-color'>Color</span>" +
+        "<input type='color' class='wiz-color' value='" + swatch + "' data-mac='" + wizEscapeHtml(light.mac) + "'>" +
+      "</label>" +
+      "<div class='wiz-rgb-sliders'>" +
+        "<label>R <input type='range' min='0' max='255' value='" + (light.r || 0) + "' class='wiz-r' data-mac='" + wizEscapeHtml(light.mac) + "'></label>" +
+        "<label>G <input type='range' min='0' max='255' value='" + (light.g || 0) + "' class='wiz-g' data-mac='" + wizEscapeHtml(light.mac) + "'></label>" +
+        "<label>B <input type='range' min='0' max='255' value='" + (light.b || 0) + "' class='wiz-b' data-mac='" + wizEscapeHtml(light.mac) + "'></label>" +
+      "</div>" +
+    "</div>"
+  );
+}
+
+function wizBuildCardHtml(light) {
+  const dimPct = Math.round((light.dimming || 0) * 100 / 255);
+  const displayName = wizDisplayName(light);
+  const meta = wizMetaLine(light);
+  return (
+    "<div class='wiz-card-head'>" +
+      "<span class='wiz-badge'>" + wizEscapeHtml(wizStatusBadge(light)) + "</span>" +
+      "<div class='wiz-title-block'>" +
+        "<input type='text' class='wiz-name-input' value='" + wizEscapeHtml(displayName) + "' data-mac='" + wizEscapeHtml(light.mac) + "' placeholder='Light name'>" +
+        "<input type='text' class='wiz-room-input' value='" + wizEscapeHtml(light.room || "") + "' data-mac='" + wizEscapeHtml(light.mac) + "' placeholder='Room (optional)' data-i18n-placeholder='wiz-room-placeholder'>" +
+      "</div>" +
+      "<button type='button' class='wiz-remove' data-mac='" + wizEscapeHtml(light.mac) + "' title='Remove'>&times;</button>" +
+    "</div>" +
+    (meta ? "<div class='wiz-card-meta'>" + wizEscapeHtml(meta) + "</div>" : "") +
+    "<div class='wiz-card-controls'>" +
+      "<label><input type='checkbox' class='wiz-toggle' data-mac='" + wizEscapeHtml(light.mac) + "'" + (light.on ? " checked" : "") + "> <span data-i18n-key='wiz-on'>On</span></label>" +
+      "<input type='range' min='0' max='100' value='" + dimPct + "' class='wiz-dim' data-mac='" + wizEscapeHtml(light.mac) + "'>" +
+      "<span class='wiz-dim-label'>" + dimPct + "%</span>" +
+    "</div>" +
+    wizBuildRgbHtml(light)
+  );
+}
+
+function wizUpdateLightCard(card, light) {
+  card.dataset.mac = light.mac;
+  card.className = "wiz-card" + wizCardClass(light);
+
+  const badge = card.querySelector(".wiz-badge");
+  if (badge) badge.textContent = wizStatusBadge(light);
+
+  const meta = card.querySelector(".wiz-card-meta");
+  const metaText = wizMetaLine(light);
+  if (metaText) {
+    if (meta) meta.textContent = metaText;
+    else {
+      const head = card.querySelector(".wiz-card-head");
+      if (head) {
+        const metaEl = document.createElement("div");
+        metaEl.className = "wiz-card-meta";
+        metaEl.textContent = metaText;
+        head.insertAdjacentElement("afterend", metaEl);
+      }
+    }
+  } else if (meta) {
+    meta.remove();
+  }
+
+  wizSetInputValue(card.querySelector(".wiz-name-input"), wizDisplayName(light));
+  wizSetInputValue(card.querySelector(".wiz-room-input"), light.room || "");
+
+  const toggle = card.querySelector(".wiz-toggle");
+  if (toggle && document.activeElement !== toggle) toggle.checked = !!light.on;
+
+  const dim = card.querySelector(".wiz-dim");
+  const dimPct = Math.round((light.dimming || 0) * 100 / 255);
+  wizSetInputValue(dim, String(dimPct));
+  const dimLabel = card.querySelector(".wiz-dim-label");
+  if (dimLabel && document.activeElement !== dim) dimLabel.textContent = dimPct + "%";
+
+  let rgbBlock = card.querySelector(".wiz-rgb-controls");
+  if (wizLightIsRgb(light)) {
+    if (!rgbBlock) {
+      card.insertAdjacentHTML("beforeend", wizBuildRgbHtml(light));
+      rgbBlock = card.querySelector(".wiz-rgb-controls");
+    } else {
+      wizSetInputValue(rgbBlock.querySelector(".wiz-color"), wizRgbToHex(light.r, light.g, light.b));
+      wizSetInputValue(rgbBlock.querySelector(".wiz-r"), String(light.r || 0));
+      wizSetInputValue(rgbBlock.querySelector(".wiz-g"), String(light.g || 0));
+      wizSetInputValue(rgbBlock.querySelector(".wiz-b"), String(light.b || 0));
+    }
+  } else if (rgbBlock) {
+    rgbBlock.remove();
+  }
+}
+
+function wizCreateLightCard(light) {
+  const card = document.createElement("div");
+  card.className = "wiz-card" + wizCardClass(light);
+  card.dataset.mac = light.mac;
+  card.innerHTML = wizBuildCardHtml(light);
+  return card;
+}
+
+function wizInitLightGrid() {
+  const grid = document.getElementById("wiz_light_grid");
+  if (!grid || grid.dataset.bound) return;
+  grid.dataset.bound = "1";
+
+  grid.addEventListener("change", event => {
+    const el = event.target;
+    const mac = el.dataset.mac;
+    if (!mac) return;
+
+    if (el.classList.contains("wiz-toggle")) {
+      wizSendCommand({ mac: mac, on: el.checked });
+      return;
+    }
+    if (el.classList.contains("wiz-dim")) {
+      const pct = parseInt(el.value, 10) || 0;
+      const label = el.parentElement.querySelector(".wiz-dim-label");
+      if (label) label.textContent = pct + "%";
+      const card = el.closest(".wiz-card");
+      const payload = { mac: mac, on: true, dimming: Math.round(pct * 255 / 100) };
+      wizApplyCardRgb(card, payload);
+      wizSendCommand(payload);
+      return;
+    }
+    if (el.classList.contains("wiz-r") || el.classList.contains("wiz-g") || el.classList.contains("wiz-b")) {
+      const block = el.closest(".wiz-rgb-controls");
+      if (!block) return;
+      const r = parseInt(block.querySelector(".wiz-r").value, 10) || 0;
+      const g = parseInt(block.querySelector(".wiz-g").value, 10) || 0;
+      const b = parseInt(block.querySelector(".wiz-b").value, 10) || 0;
+      const color = block.querySelector(".wiz-color");
+      if (color) color.value = wizRgbToHex(r, g, b);
+      wizSendRgb(mac, r, g, b, el.closest(".wiz-card"));
+      return;
+    }
+    if (el.classList.contains("wiz-name-input")) {
+      const item = wizConfiguredLights.find(l => l.mac === mac);
+      if (item) item.name = el.value.trim() || item.mac;
+      wizSaveConfig();
+      return;
+    }
+    if (el.classList.contains("wiz-room-input")) {
+      const item = wizConfiguredLights.find(l => l.mac === mac);
+      if (item) item.room = el.value.trim();
+      wizSaveConfig();
+    }
+  });
+
+  grid.addEventListener("input", event => {
+    const el = event.target;
+    if (!el.classList.contains("wiz-color")) return;
+    const rgb = wizHexToRgb(el.value);
+    const block = el.closest(".wiz-rgb-controls");
+    if (block) {
+      wizSetInputValue(block.querySelector(".wiz-r"), String(rgb.r));
+      wizSetInputValue(block.querySelector(".wiz-g"), String(rgb.g));
+      wizSetInputValue(block.querySelector(".wiz-b"), String(rgb.b));
+    }
+    wizSendRgb(el.dataset.mac, rgb.r, rgb.g, rgb.b, el.closest(".wiz-card"));
+  });
+
+  grid.addEventListener("click", event => {
+    const btn = event.target.closest(".wiz-remove");
+    if (!btn) return;
+    wizConfiguredLights = wizConfiguredLights.filter(l => l.mac !== btn.dataset.mac);
+    wizSaveConfig().then(() => wizRefreshLights());
+  });
 }
 
 function wizRenderLightGrid(lights) {
   const grid = document.getElementById("wiz_light_grid");
   if (!grid) return;
-  grid.innerHTML = "";
+  wizInitLightGrid();
+
   if (!lights.length) {
     grid.innerHTML = "<p class='wiz-empty' data-i18n-key='wiz-no-lights'>No lights configured yet. Scan and add bulbs above.</p>";
     return;
   }
-  lights.forEach(light => {
-    const card = document.createElement("div");
-    card.className = "wiz-card" + wizCardClass(light);
-    const dimPct = Math.round((light.dimming || 0) * 100 / 255);
-    const displayName = wizDisplayName(light);
-    const meta = wizMetaLine(light);
-    const swatch = light.rgb ? wizRgbToHex(light.r, light.g, light.b) : "";
-    let rgbHtml = "";
-    if (light.rgb) {
-      rgbHtml =
-        "<div class='wiz-rgb-controls' data-mac='" + wizEscapeHtml(light.mac) + "'>" +
-          "<label class='wiz-color-wrap'>" +
-            "<span data-i18n-key='wiz-color'>Color</span>" +
-            "<input type='color' class='wiz-color' value='" + swatch + "' data-mac='" + wizEscapeHtml(light.mac) + "'>" +
-          "</label>" +
-          "<div class='wiz-rgb-sliders'>" +
-            "<label>R <input type='range' min='0' max='255' value='" + (light.r || 0) + "' class='wiz-r' data-mac='" + wizEscapeHtml(light.mac) + "'></label>" +
-            "<label>G <input type='range' min='0' max='255' value='" + (light.g || 0) + "' class='wiz-g' data-mac='" + wizEscapeHtml(light.mac) + "'></label>" +
-            "<label>B <input type='range' min='0' max='255' value='" + (light.b || 0) + "' class='wiz-b' data-mac='" + wizEscapeHtml(light.mac) + "'></label>" +
-          "</div>" +
-        "</div>";
-    }
-    card.innerHTML =
-      "<div class='wiz-card-head'>" +
-        "<span class='wiz-badge'>" + wizEscapeHtml(wizStatusBadge(light)) + "</span>" +
-        "<div class='wiz-title-block'>" +
-          "<input type='text' class='wiz-name-input' value='" + wizEscapeHtml(displayName) + "' data-mac='" + wizEscapeHtml(light.mac) + "' placeholder='Light name'>" +
-          "<input type='text' class='wiz-room-input' value='" + wizEscapeHtml(light.room || "") + "' data-mac='" + wizEscapeHtml(light.mac) + "' placeholder='Room (optional)' data-i18n-placeholder='wiz-room-placeholder'>" +
-        "</div>" +
-        "<button type='button' class='wiz-remove' data-mac='" + wizEscapeHtml(light.mac) + "' title='Remove'>&times;</button>" +
-      "</div>" +
-      (meta ? "<div class='wiz-card-meta'>" + wizEscapeHtml(meta) + "</div>" : "") +
-      "<div class='wiz-card-controls'>" +
-        "<label><input type='checkbox' class='wiz-toggle' data-mac='" + wizEscapeHtml(light.mac) + "'" + (light.on ? " checked" : "") + "> <span data-i18n-key='wiz-on'>On</span></label>" +
-        "<input type='range' min='0' max='100' value='" + dimPct + "' class='wiz-dim' data-mac='" + wizEscapeHtml(light.mac) + "'>" +
-        "<span class='wiz-dim-label'>" + dimPct + "%</span>" +
-      "</div>" +
-      rgbHtml;
-    grid.appendChild(card);
+
+  const existing = new Map();
+  grid.querySelectorAll(".wiz-card").forEach(card => {
+    if (card.dataset.mac) existing.set(card.dataset.mac, card);
   });
 
-  grid.querySelectorAll(".wiz-toggle").forEach(el => {
-    el.addEventListener("change", () => wizSendCommand({ mac: el.dataset.mac, on: el.checked }));
+  const seen = new Set();
+  lights.forEach(light => {
+    seen.add(light.mac);
+    const card = existing.get(light.mac);
+    if (card) wizUpdateLightCard(card, light);
+    else grid.appendChild(wizCreateLightCard(light));
   });
-  grid.querySelectorAll(".wiz-dim").forEach(el => {
-    el.addEventListener("change", () => {
-      const pct = parseInt(el.value, 10) || 0;
-      el.parentElement.querySelector(".wiz-dim-label").textContent = pct + "%";
-      const card = el.closest(".wiz-card");
-      const payload = { mac: el.dataset.mac, on: true, dimming: Math.round(pct * 255 / 100) };
-      wizApplyCardRgb(card, payload);
-      wizSendCommand(payload);
-    });
+
+  existing.forEach((card, mac) => {
+    if (!seen.has(mac)) card.remove();
   });
-  grid.querySelectorAll(".wiz-color").forEach(el => {
-    el.addEventListener("input", () => {
-      const rgb = wizHexToRgb(el.value);
-      const block = el.closest(".wiz-rgb-controls");
-      if (block) {
-        const r = block.querySelector(".wiz-r");
-        const g = block.querySelector(".wiz-g");
-        const b = block.querySelector(".wiz-b");
-        if (r) r.value = rgb.r;
-        if (g) g.value = rgb.g;
-        if (b) b.value = rgb.b;
-      }
-      wizSendRgb(el.dataset.mac, rgb.r, rgb.g, rgb.b, el.closest(".wiz-card"));
-    });
-  });
-  ["wiz-r", "wiz-g", "wiz-b"].forEach(cls => {
-    grid.querySelectorAll("." + cls).forEach(el => {
-      el.addEventListener("change", () => {
-        const block = el.closest(".wiz-rgb-controls");
-        if (!block) return;
-        const r = parseInt(block.querySelector(".wiz-r").value, 10) || 0;
-        const g = parseInt(block.querySelector(".wiz-g").value, 10) || 0;
-        const b = parseInt(block.querySelector(".wiz-b").value, 10) || 0;
-        const color = block.querySelector(".wiz-color");
-        if (color) color.value = wizRgbToHex(r, g, b);
-        wizSendRgb(el.dataset.mac, r, g, b, el.closest(".wiz-card"));
-      });
-    });
-  });
-  grid.querySelectorAll(".wiz-remove").forEach(el => {
-    el.addEventListener("click", () => {
-      wizConfiguredLights = wizConfiguredLights.filter(l => l.mac !== el.dataset.mac);
-      wizSaveConfig().then(() => wizRefreshLights());
-    });
-  });
-  grid.querySelectorAll(".wiz-name-input").forEach(el => {
-    el.addEventListener("change", () => {
-      const item = wizConfiguredLights.find(l => l.mac === el.dataset.mac);
-      if (item) item.name = el.value.trim() || item.mac;
-      wizSaveConfig();
-    });
-  });
-  grid.querySelectorAll(".wiz-room-input").forEach(el => {
-    el.addEventListener("change", () => {
-      const item = wizConfiguredLights.find(l => l.mac === el.dataset.mac);
-      if (item) item.room = el.value.trim();
-      wizSaveConfig();
-    });
-  });
+
+  const empty = grid.querySelector(".wiz-empty");
+  if (empty) empty.remove();
 }
 
 function wizCardDimming(card) {
@@ -1305,13 +1431,25 @@ function wizAllCommand(on) {
   wizSendCommand({ all: true, on: on }).then(() => setTimeout(wizRefreshLights, 800));
 }
 
+function wizStartPagePolling() {
+  if (wizPageTimer) clearInterval(wizPageTimer);
+  if (!wizShouldPoll()) return;
+  wizPageTimer = setInterval(wizRefreshLights, wizPagePollMs());
+}
+
 function wizStartPage() {
   wizStopPolling();
+  wizInitLightGrid();
   wizLoadConfig()
     .then(() => wizRefreshLights())
     .catch(err => wizSetStatus("Config load failed: " + err, true));
-  if (wizPageTimer) clearInterval(wizPageTimer);
-  wizPageTimer = setInterval(wizRefreshLights, WIZ_PAGE_POLL_MS);
+  wizStartPagePolling();
+}
+
+function wizResumePage() {
+  if (activeTab !== "bWizLights") return;
+  wizRefreshLights();
+  wizStartPagePolling();
 }
 
 //entry point 
@@ -1325,6 +1463,7 @@ function visibilityListener() {
 			clearInterval(tabTimer);  
 			PauseAPI=true;
 			objDAL?.pauseLiveStreams();
+			wizStopPolling();
 			break;
     case "visible":
 			PauseAPI=false;
