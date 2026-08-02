@@ -641,7 +641,12 @@ function heltyPollScanStatus() {
       } else if (json.phase === 1) {
         heltyFinishScan("Helty client busy (test or poll in progress)", true);
       } else if (json.phase === 2) {
-        heltySetStatus("helty_scan_progress", "Scanning... " + (json.progress || 0) + "%", false);
+        const partial = json.results || [];
+        if (partial.length) heltyRenderScanResults(partial);
+        const foundNote = partial.length
+          ? " — found " + partial.length + " device" + (partial.length === 1 ? "" : "s")
+          : "";
+        heltySetStatus("helty_scan_progress", "Scanning... " + (json.progress || 0) + "%" + foundNote, false);
       } else if (json.phase === 3) {
         const results = json.results || [];
         heltyFinishScan(

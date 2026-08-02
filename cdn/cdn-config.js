@@ -3,7 +3,7 @@
 // CDN_REV is a git commit SHA (not "main") so jsDelivr serves updates immediately.
 // Bumped automatically by sync-from-firmware.ps1 after each sync commit.
 window.CDN_REPO = "pioreq2580/ultra-dongle-web";
-window.CDN_REV  = "f911c40";
+window.CDN_REV  = "687bd0e";
 window.CDN_PATH = "cdn";
 window.CDN_BASE = "https://cdn.jsdelivr.net/gh/" + window.CDN_REPO + "@" + window.CDN_REV + "/" + window.CDN_PATH;
 window.cdnAsset = function (file) {
