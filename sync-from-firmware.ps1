@@ -82,6 +82,14 @@ try {
     Set-CdnPointer -TargetRoot $root -Rev $rev
     git add cdn/cdn-config.js data/DSMRindexEDGE.html | Out-Null
     git commit --amend --no-edit | Out-Null
+  }
+
+  $rev = git rev-parse --short HEAD
+  Set-CdnPointer -TargetRoot $root -Rev $rev
+  git add cdn/cdn-config.js data/DSMRindexEDGE.html | Out-Null
+  $pending = git status --porcelain -- cdn/cdn-config.js data/DSMRindexEDGE.html
+  if ($pending) {
+    git commit -m "chore: bump CDN rev to reachable commit" | Out-Null
     $rev = git rev-parse --short HEAD
   }
 } finally {
