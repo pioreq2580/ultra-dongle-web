@@ -6,14 +6,18 @@
 	<meta charset="UTF-8">
 	<meta name="robots" content="noindex">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-	<!-- Frontend CDN: pioreq2580/ultra-dongle-web@4f32048 (public web repo). -->
+	<!-- Frontend CDN: pioreq2580/ultra-dongle-web@main (always latest on jsDelivr). -->
 	<meta name="msapplication-TileImage" content="https://cdn.jsdelivr.net/gh/mhendriks/P1-Dongel-ESP32@latest/cdn/favicon/ms-icon-310x310.png">
 
 	<script>
 	  window.__CDN_REPO__ = "pioreq2580/ultra-dongle-web";
-	  window.__CDN_REV__  = "4f32048";
+	  window.__CDN_REF__  = "main";
+	  window.__CDN_CACHE__ = Date.now();
+	  window.__cdnBase = function () {
+	    return "https://cdn.jsdelivr.net/gh/" + window.__CDN_REPO__ + "@" + window.__CDN_REF__ + "/cdn";
+	  };
 	  window.__cdnUrl = function (file) {
-	    return "https://cdn.jsdelivr.net/gh/" + window.__CDN_REPO__ + "@" + window.__CDN_REV__ + "/cdn/" + file + "?v=" + window.__CDN_REV__;
+	    return window.__cdnBase() + "/" + file + "?v=" + window.__CDN_CACHE__;
 	  };
 	</script>
 	<link rel="stylesheet" type="text/css" id="cdn-css">
@@ -52,10 +56,7 @@
 	  function readPageBody()
 	  {
 		console.log("readPageBody() ..");
-		// Device shell __CDN_REV__ is authoritative; cdn-config.js may pin a stale amended commit.
-		const cdnRev = window.__CDN_REV__ || window.CDN_REV || ((typeof CDN_REV !== "undefined") ? CDN_REV : "main");
-		const cdnBase = "https://cdn.jsdelivr.net/gh/" + window.__CDN_REPO__ + "@" + cdnRev + "/cdn";
-		fetch(cdnBase + "/DSMRindex_body.html?v=" + cdnRev)
+		fetch(window.__cdnUrl("DSMRindex_body.html"))
 		  .then(response => {
 			if (response.ok) {
 			  return response.text();
