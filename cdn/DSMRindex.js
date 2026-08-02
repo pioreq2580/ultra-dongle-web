@@ -624,9 +624,18 @@ function heltyRenderScanResults(results) {
   table.style.display = "";
 }
 
+function heltyDbgLog(location, message, data, hypothesisId) {
+  // #region agent log
+  fetch('http://127.0.0.1:7426/ingest/67ad7ecd-8b16-46de-b055-11bf3bac0fc4',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'159740'},body:JSON.stringify({sessionId:'159740',location:location,message:message,data:data,hypothesisId:hypothesisId,timestamp:Date.now(),runId:'post-fix'})}).catch(()=>{});
+  // #endregion
+}
+
 function heltyPollScanStatus() {
   heltyApi("/api/v2/helty/discover")
     .then(json => {
+      // #region agent log
+      heltyDbgLog('DSMRindex.js:heltyPollScanStatus','discover poll',{phase:json.phase,progress:json.progress,results:(json.results||[]).length,scan_last_host:json.scan_last_host,scan_hosts_checked:json.scan_hosts_checked,scan_tcp_opens:json.scan_tcp_opens,error:json.error||''},'H1');
+      // #endregion
       if (json.phase === 0) {
         heltySetStatus("helty_scan_progress", "Scan queued...", false);
       } else if (json.phase === 1) {
@@ -656,7 +665,11 @@ function heltyScan() {
   heltySetStatus("helty_scan_progress", "Starting network scan...", false);
   document.getElementById("helty_scan_results").style.display = "none";
   heltySetDiscoverButtonsDisabled(true);
-  heltyApi("/api/v2/helty/discover", "POST", { mode: "scan", port: parseInt(document.getElementById("helty_port").value, 10) || 5001 })
+  const port = parseInt(document.getElementById("helty_port").value, 10) || 5001;
+  // #region agent log
+  heltyDbgLog('DSMRindex.js:heltyScan','scan start',{port:port,host:document.getElementById('helty_host').value.trim()},'H5');
+  // #endregion
+  heltyApi("/api/v2/helty/discover", "POST", { mode: "scan", port })
     .then(() => {
       heltyStopDiscoverPolling();
       heltySetDiscoverButtonsDisabled(true);
