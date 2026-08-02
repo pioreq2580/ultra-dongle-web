@@ -562,7 +562,15 @@ function heltyPollTestStatus() {
       } else if (json.phase === 3 && json.test_host) {
         clearInterval(heltyTestTimer);
         heltyTestTimer = null;
-        heltySetStatus("helty_discover_status", "Connected: " + (json.test_name || json.test_host), false);
+        const msg = "Connected: " + (json.test_name || json.test_host);
+        heltySetStatus("helty_discover_status", msg + (document.getElementById("helty_enabled").checked ? "" : " — enable Air Guard hub to poll"), false);
+        if (json.test_name) {
+          const hostEl = document.getElementById("helty_host");
+          if (hostEl && !hostEl.value.trim()) hostEl.value = json.test_host;
+        }
+        // #region agent log
+        heltyDbgLog('DSMRindex.js:heltyPollTestStatus','test ok',{test_host:json.test_host,test_name:json.test_name,enabled:document.getElementById('helty_enabled').checked},'H1');
+        // #endregion
       } else if (json.phase === 4 && json.test_host) {
         clearInterval(heltyTestTimer);
         heltyTestTimer = null;
