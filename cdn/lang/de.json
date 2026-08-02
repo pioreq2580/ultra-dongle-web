@@ -127,6 +127,10 @@
   "wiz-btn-add-selected": "Add selected",
   "wiz-my-lights": "My lights",
   "wiz-no-lights": "No lights configured yet. Scan and add bulbs above.",
+  "wiz-color": "Color",
+  "wiz-on": "On",
+  "wiz-room-placeholder": "Room (optional)",
+  "wiz-name-hint": "Names come from the bulb moduleName over LAN; WiZ app room names are cloud-only. Rename here as needed."
   "lbl-advance": "Vorschussbetrag",
   "lbl-mth-from-net": "Verringern ",
   "lbl-mth-current": " diezer Periode",
