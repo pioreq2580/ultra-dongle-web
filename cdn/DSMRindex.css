@@ -1543,6 +1543,53 @@ select#languageSelector {background-color: unset; color: #fff; border: none;colo
 }
 
 .wiz-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.wiz-room {
+  border: 1px solid rgba(0,0,0,0.1);
+  border-radius: 8px;
+  padding: 10px 12px 12px;
+  background: #fafafa;
+}
+
+.wiz-room-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 10px;
+}
+
+.wiz-room-head-static {
+  margin-bottom: 8px;
+}
+
+.wiz-room-title {
+  font-weight: 600;
+  color: #444;
+}
+
+.wiz-room-name-input {
+  flex: 1;
+  min-width: 140px;
+  font-weight: 600;
+}
+
+.wiz-room-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.wiz-room-actions button {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.wiz-room-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: 12px;

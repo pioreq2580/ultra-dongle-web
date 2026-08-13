@@ -941,6 +941,7 @@ function heltyStartDiscover() {
 let wizScanTimer = null;
 let wizPageTimer = null;
 let wizConfiguredLights = [];
+let wizConfiguredRooms = [];
 let wizPollSec = 30;
 let wizRgbDebounce = {};
 let wizCctDebounce = {};
@@ -1018,6 +1019,39 @@ function wizLightIsRgb(light) {
   return false;
 }
 
+function wizRoomSectionKey(roomId) {
+  return "room-" + (roomId || 0);
+}
+
+function wizRoomDisplayName(roomId) {
+  if (!roomId) return typeof t === "function" ? t("wiz-room-unassigned") : "Unassigned";
+  const room = wizConfiguredRooms.find(r => r.id === roomId);
+  if (room && room.name) return room.name;
+  return typeof t === "function" ? t("wiz-room-unnamed") : "Unnamed room";
+}
+
+function wizScanRoomLabel(item) {
+  if (item.room) return item.room;
+  if (item.room_id) return wizRoomDisplayName(item.room_id);
+  return "—";
+}
+
+function wizGroupLightsByRoom(lights) {
+  const groups = new Map();
+  lights.forEach(light => {
+    const key = String(light.room_id || 0);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(light);
+  });
+  return [...groups.entries()].sort((a, b) => {
+    const idA = parseInt(a[0], 10) || 0;
+    const idB = parseInt(b[0], 10) || 0;
+    if (idA === 0) return 1;
+    if (idB === 0) return -1;
+    return wizRoomDisplayName(idA).localeCompare(wizRoomDisplayName(idB));
+  });
+}
+
 function wizLightIsCct(light) {
   if (!light) return false;
   if (typeof light.cct === "boolean") return light.cct;
@@ -1058,7 +1092,15 @@ function wizLoadConfig() {
     document.getElementById("wiz_enabled").checked = !!json.enabled;
     document.getElementById("wiz_poll").value = json.poll_sec || 30;
     wizPollSec = json.poll_sec || 30;
-    wizConfiguredLights = (json.lights || []).filter(l => !wizIsMockLight(l));
+    wizConfiguredRooms = json.rooms || [];
+    wizConfiguredLights = (json.lights || []).filter(l => !wizIsMockLight(l)).map(l => ({
+      mac: l.mac,
+      ip: l.ip,
+      name: l.name,
+      room: l.room || "",
+      room_id: l.room_id || 0,
+      enabled: l.enabled !== false
+    }));
     return json;
   });
 }
@@ -1067,11 +1109,31 @@ function wizSaveConfig() {
   const payload = {
     enabled: document.getElementById("wiz_enabled").checked,
     poll_sec: parseInt(document.getElementById("wiz_poll").value, 10) || 30,
+    rooms: wizConfiguredRooms,
     lights: wizConfiguredLights.filter(l => !wizIsMockLight(l))
   };
   return wizApi("/api/v2/wiz/config", "POST", payload)
     .then(() => wizSetStatus("Configuration saved.", false))
     .catch(err => wizSetStatus("Save failed: " + err, true));
+}
+
+function wizSaveRoomName(roomId, name) {
+  roomId = parseInt(roomId, 10) || 0;
+  if (!roomId) return Promise.resolve();
+  const trimmed = (name || "").trim();
+  let room = wizConfiguredRooms.find(r => r.id === roomId);
+  if (room) room.name = trimmed;
+  else wizConfiguredRooms.push({ id: roomId, name: trimmed });
+  wizConfiguredLights.forEach(l => {
+    if (l.room_id === roomId) l.room = trimmed;
+  });
+  return wizSaveConfig();
+}
+
+function wizRoomCommand(roomId, on) {
+  roomId = parseInt(roomId, 10) || 0;
+  if (!roomId) return;
+  wizSendCommand({ room_id: roomId, on: on });
 }
 
 function wizScanProgressText(json) {
@@ -1177,9 +1239,12 @@ function wizRenderScanResults(results) {
     const tr = document.createElement("tr");
     const already = known.has(item.mac);
     const label = item.name || item.module_name || item.mac;
+    const roomId = item.room_id || 0;
+    const roomLabel = wizScanRoomLabel(item);
     tr.innerHTML =
-      "<td><input type='checkbox' class='wiz-scan-check' data-mac='" + wizEscapeHtml(item.mac) + "' data-ip='" + wizEscapeHtml(item.ip) + "' data-name='" + wizEscapeHtml(label) + "'" + (already ? " disabled" : "") + "></td>" +
+      "<td><input type='checkbox' class='wiz-scan-check' data-mac='" + wizEscapeHtml(item.mac) + "' data-ip='" + wizEscapeHtml(item.ip) + "' data-name='" + wizEscapeHtml(label) + "' data-room-id='" + roomId + "' data-room='" + wizEscapeHtml(item.room || "") + "'" + (already ? " disabled" : "") + "></td>" +
       "<td><strong>" + wizEscapeHtml(label) + "</strong></td>" +
+      "<td>" + wizEscapeHtml(roomLabel) + "</td>" +
       "<td>" + wizEscapeHtml(item.ip) + "</td>" +
       "<td class='wiz-mac-cell'>" + wizEscapeHtml(item.mac) + "</td>";
     body.appendChild(tr);
@@ -1196,13 +1261,21 @@ function wizAddSelected() {
   checks.forEach(ch => {
     const mac = ch.dataset.mac;
     if (!mac || known.has(mac) || mac === WIZ_MOCK_MAC) return;
+    const roomId = parseInt(ch.dataset.roomId, 10) || 0;
+    const roomName = ch.dataset.room || "";
     wizConfiguredLights.push({
       mac: mac,
       ip: ch.dataset.ip || "",
       name: ch.dataset.name || mac,
-      room: "",
+      room_id: roomId,
+      room: roomName,
       enabled: true
     });
+    if (roomId && roomName) {
+      const room = wizConfiguredRooms.find(r => r.id === roomId);
+      if (room) room.name = roomName;
+      else wizConfiguredRooms.push({ id: roomId, name: roomName });
+    }
     known.add(mac);
   });
   wizSaveConfig().then(() => wizRefreshLights());
@@ -1213,10 +1286,12 @@ function wizRefreshLights(force) {
   return wizApi("/api/v2/wiz/lights")
     .then(json => {
       wizPollSec = json.poll_sec || wizPollSec;
+      wizConfiguredRooms = json.rooms || wizConfiguredRooms;
       wizConfiguredLights = (json.lights || [])
         .filter(l => !wizIsMockLight(l))
         .map(l => ({
-          mac: l.mac, ip: l.ip, name: l.name, room: l.room || "", enabled: l.enabled !== false
+          mac: l.mac, ip: l.ip, name: l.name, room: l.room || "", room_id: l.room_id || 0,
+          enabled: l.enabled !== false
         }));
       wizRenderLightGrid((json.lights || []).filter(l => !wizIsMockLight(l)));
     })
@@ -1264,7 +1339,6 @@ function wizBuildCardHtml(light) {
       "<span class='wiz-badge'>" + wizEscapeHtml(wizStatusBadge(light)) + "</span>" +
       "<div class='wiz-title-block'>" +
         "<input type='text' class='wiz-name-input' value='" + wizEscapeHtml(displayName) + "' data-mac='" + wizEscapeHtml(light.mac) + "' placeholder='Light name'>" +
-        "<input type='text' class='wiz-room-input' value='" + wizEscapeHtml(light.room || "") + "' data-mac='" + wizEscapeHtml(light.mac) + "' placeholder='Room (optional)' data-i18n-placeholder='wiz-room-placeholder'>" +
       "</div>" +
       "<button type='button' class='wiz-remove' data-mac='" + wizEscapeHtml(light.mac) + "' title='Remove'>&times;</button>" +
     "</div>" +
@@ -1304,7 +1378,6 @@ function wizUpdateLightCard(card, light) {
   }
 
   wizSetInputValue(card.querySelector(".wiz-name-input"), wizDisplayName(light));
-  wizSetInputValue(card.querySelector(".wiz-room-input"), light.room || "");
 
   const toggle = card.querySelector(".wiz-toggle");
   if (toggle && document.activeElement !== toggle) toggle.checked = !!light.on;
@@ -1353,6 +1426,45 @@ function wizCreateLightCard(light) {
   return card;
 }
 
+function wizEnsureRoomSection(grid, roomId) {
+  const key = wizRoomSectionKey(roomId);
+  let section = grid.querySelector('.wiz-room[data-room-key="' + key + '"]');
+  if (!section) {
+    section = document.createElement("div");
+    section.className = "wiz-room";
+    section.dataset.roomKey = key;
+    section.dataset.roomId = String(roomId || 0);
+    if (roomId) {
+      const placeholder = typeof t === "function" ? t("wiz-room-name-placeholder") : "Name this room";
+      const allOn = typeof t === "function" ? t("wiz-btn-all-on") : "All on";
+      const allOff = typeof t === "function" ? t("wiz-btn-all-off") : "All off";
+      section.innerHTML =
+        "<div class='wiz-room-head'>" +
+          "<input type='text' class='wiz-room-name-input' data-room-id='" + roomId + "' placeholder='" + wizEscapeHtml(placeholder) + "'>" +
+          "<div class='wiz-room-actions'>" +
+            "<button type='button' class='wiz-room-on' data-room-id='" + roomId + "'>" + wizEscapeHtml(allOn) + "</button>" +
+            "<button type='button' class='wiz-room-off' data-room-id='" + roomId + "'>" + wizEscapeHtml(allOff) + "</button>" +
+          "</div>" +
+        "</div>" +
+        "<div class='wiz-room-grid'></div>";
+    } else {
+      const unassigned = typeof t === "function" ? t("wiz-room-unassigned") : "Unassigned";
+      section.innerHTML =
+        "<div class='wiz-room-head wiz-room-head-static'>" +
+          "<span class='wiz-room-title'>" + wizEscapeHtml(unassigned) + "</span>" +
+        "</div>" +
+        "<div class='wiz-room-grid'></div>";
+    }
+    grid.appendChild(section);
+  }
+  const nameInput = section.querySelector(".wiz-room-name-input");
+  if (nameInput && document.activeElement !== nameInput) {
+    const room = wizConfiguredRooms.find(r => r.id === roomId);
+    wizSetInputValue(nameInput, (room && room.name) || "");
+  }
+  return section.querySelector(".wiz-room-grid");
+}
+
 function wizInitLightGrid() {
   const grid = document.getElementById("wiz_light_grid");
   if (!grid || grid.dataset.bound) return;
@@ -1361,6 +1473,10 @@ function wizInitLightGrid() {
   grid.addEventListener("change", event => {
     const el = event.target;
     const mac = el.dataset.mac;
+    if (el.classList.contains("wiz-room-name-input")) {
+      wizSaveRoomName(el.dataset.roomId, el.value);
+      return;
+    }
     if (!mac) return;
 
     if (el.classList.contains("wiz-toggle")) {
@@ -1398,12 +1514,6 @@ function wizInitLightGrid() {
       const item = wizConfiguredLights.find(l => l.mac === mac);
       if (item) item.name = el.value.trim() || item.mac;
       wizSaveConfig();
-      return;
-    }
-    if (el.classList.contains("wiz-room-input")) {
-      const item = wizConfiguredLights.find(l => l.mac === mac);
-      if (item) item.room = el.value.trim();
-      wizSaveConfig();
     }
   });
 
@@ -1417,6 +1527,16 @@ function wizInitLightGrid() {
   });
 
   grid.addEventListener("click", event => {
+    const roomOn = event.target.closest(".wiz-room-on");
+    if (roomOn) {
+      wizRoomCommand(roomOn.dataset.roomId, true);
+      return;
+    }
+    const roomOff = event.target.closest(".wiz-room-off");
+    if (roomOff) {
+      wizRoomCommand(roomOff.dataset.roomId, false);
+      return;
+    }
     const btn = event.target.closest(".wiz-remove");
     if (!btn) return;
     wizConfiguredLights = wizConfiguredLights.filter(l => l.mac !== btn.dataset.mac);
@@ -1434,21 +1554,43 @@ function wizRenderLightGrid(lights) {
     return;
   }
 
-  const existing = new Map();
+  const existingCards = new Map();
   grid.querySelectorAll(".wiz-card").forEach(card => {
-    if (card.dataset.mac) existing.set(card.dataset.mac, card);
+    if (card.dataset.mac) existingCards.set(card.dataset.mac, card);
   });
 
-  const seen = new Set();
-  lights.forEach(light => {
-    seen.add(light.mac);
-    const card = existing.get(light.mac);
-    if (card) wizUpdateLightCard(card, light);
-    else grid.appendChild(wizCreateLightCard(light));
+  const seenMacs = new Set();
+  const seenRoomKeys = new Set();
+  const groups = wizGroupLightsByRoom(lights);
+
+  groups.forEach(([roomKey, roomLights]) => {
+    const roomId = parseInt(roomKey, 10) || 0;
+    seenRoomKeys.add(wizRoomSectionKey(roomId));
+    const roomGrid = wizEnsureRoomSection(grid, roomId);
+
+    roomLights.forEach(light => {
+      seenMacs.add(light.mac);
+      let card = existingCards.get(light.mac);
+      if (card) {
+        if (card.parentElement !== roomGrid) roomGrid.appendChild(card);
+        wizUpdateLightCard(card, light);
+      } else {
+        roomGrid.appendChild(wizCreateLightCard(light));
+      }
+    });
   });
 
-  existing.forEach((card, mac) => {
-    if (!seen.has(mac)) card.remove();
+  existingCards.forEach((card, mac) => {
+    if (!seenMacs.has(mac)) card.remove();
+  });
+
+  grid.querySelectorAll(".wiz-room").forEach(section => {
+    const roomGrid = section.querySelector(".wiz-room-grid");
+    if (!seenRoomKeys.has(section.dataset.roomKey)) {
+      section.remove();
+      return;
+    }
+    if (roomGrid && !roomGrid.querySelector(".wiz-card")) section.remove();
   });
 
   const empty = grid.querySelector(".wiz-empty");
