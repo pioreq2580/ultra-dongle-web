@@ -703,7 +703,7 @@ function heltyScan() {
 
 function heltyFormatValue(label, value, unit) {
   if (value === undefined || value === null || value === "") return "";
-  return `<div class="helty-card"><div class="helty-card-label">${label}</div><div class="helty-card-value">${value}${unit ? " " + unit : ""}</div></div>`;
+  return `<div class="card"><h1>${label}</h1><h2>${value}${unit ? " " + unit : ""}</h2></div>`;
 }
 
 function heltyEscapeHtml(str) {
@@ -1200,7 +1200,7 @@ function euromUpdateTelemetryGrid(json) {
   const card = (label, value, unit) => {
     const empty = value === undefined || value === null || value === "";
     const shown = empty ? dash : value;
-    return `<div class="helty-card"><div class="helty-card-label">${euromEscapeHtml(label)}</div><div class="helty-card-value">${euromEscapeHtml(shown)}${!empty && unit ? " " + unit : ""}</div></div>`;
+    return `<div class="card"><h1>${euromEscapeHtml(label)}</h1><h2>${euromEscapeHtml(shown)}${!empty && unit ? " " + unit : ""}</h2></div>`;
   };
   let html = "";
   html += card(t("eurom-tx-connected"), json.connected ? t("eurom-status-online") : t("eurom-status-offline"));
@@ -1647,27 +1647,29 @@ function wizBuildCardHtml(light) {
   const displayName = wizDisplayName(light);
   const meta = wizMetaLine(light);
   return (
-    "<div class='wiz-card-head'>" +
-      "<span class='wiz-badge'>" + wizEscapeHtml(wizStatusBadge(light)) + "</span>" +
-      "<div class='wiz-title-block'>" +
-        "<input type='text' class='wiz-name-input' value='" + wizEscapeHtml(displayName) + "' data-mac='" + wizEscapeHtml(light.mac) + "' placeholder='Light name'>" +
+    "<h1 class='wiz-badge'>" + wizEscapeHtml(wizStatusBadge(light)) + "</h1>" +
+    "<div class='wiz-card-body'>" +
+      "<div class='wiz-card-head'>" +
+        "<div class='wiz-title-block'>" +
+          "<input type='text' class='wiz-name-input' value='" + wizEscapeHtml(displayName) + "' data-mac='" + wizEscapeHtml(light.mac) + "' placeholder='Light name'>" +
+        "</div>" +
+        "<button type='button' class='wiz-remove' data-mac='" + wizEscapeHtml(light.mac) + "' title='Remove'>&times;</button>" +
       "</div>" +
-      "<button type='button' class='wiz-remove' data-mac='" + wizEscapeHtml(light.mac) + "' title='Remove'>&times;</button>" +
-    "</div>" +
-    (meta ? "<div class='wiz-card-meta'>" + wizEscapeHtml(meta) + "</div>" : "") +
-    "<div class='wiz-card-controls'>" +
-      "<label><input type='checkbox' class='wiz-toggle' data-mac='" + wizEscapeHtml(light.mac) + "'" + (light.on ? " checked" : "") + "> <span data-i18n-key='wiz-on'>On</span></label>" +
-      "<input type='range' min='0' max='100' value='" + dimPct + "' class='wiz-dim' data-mac='" + wizEscapeHtml(light.mac) + "'>" +
-      "<span class='wiz-dim-label'>" + dimPct + "%</span>" +
-    "</div>" +
-    wizBuildRgbHtml(light) +
-    wizBuildCctHtml(light)
+      (meta ? "<div class='wiz-card-meta'>" + wizEscapeHtml(meta) + "</div>" : "") +
+      "<div class='wiz-card-controls'>" +
+        "<label><input type='checkbox' class='wiz-toggle' data-mac='" + wizEscapeHtml(light.mac) + "'" + (light.on ? " checked" : "") + "> <span data-i18n-key='wiz-on'>On</span></label>" +
+        "<input type='range' min='0' max='100' value='" + dimPct + "' class='wiz-dim' data-mac='" + wizEscapeHtml(light.mac) + "'>" +
+        "<span class='wiz-dim-label'>" + dimPct + "%</span>" +
+      "</div>" +
+      wizBuildRgbHtml(light) +
+      wizBuildCctHtml(light) +
+    "</div>"
   );
 }
 
 function wizUpdateLightCard(card, light) {
   card.dataset.mac = light.mac;
-  card.className = "wiz-card" + wizCardClass(light);
+  card.className = "card wiz-card" + wizCardClass(light);
 
   const badge = card.querySelector(".wiz-badge");
   if (badge) badge.textContent = wizStatusBadge(light);
@@ -1732,7 +1734,7 @@ function wizUpdateLightCard(card, light) {
 
 function wizCreateLightCard(light) {
   const card = document.createElement("div");
-  card.className = "wiz-card" + wizCardClass(light);
+  card.className = "card wiz-card" + wizCardClass(light);
   card.dataset.mac = light.mac;
   card.innerHTML = wizBuildCardHtml(light);
   return card;
@@ -6034,6 +6036,15 @@ const FALLBACK_TRANSLATIONS = {
     "helty-status-stale": "Verouderde gegevens",
     "helty-status-hub-disabled": "Hub uitgeschakeld",
     "helty-btn-refresh": "Vernieuwen",
+    "helty-tx-fan-mode": "Ventilatorstand",
+    "helty-tx-indoor-temp": "Binnentemp",
+    "helty-tx-outdoor-temp": "Buitentemp",
+    "helty-tx-humidity": "Luchtvochtigheid",
+    "helty-tx-co2": "CO2",
+    "helty-tx-voc": "VOC",
+    "helty-tx-filter-hours": "Filteruren",
+    "helty-tx-last-update": "Laatste update",
+    "helty-tx-none": "Nog geen telemetrie.",
     "eurom-status-online": "Online",
     "eurom-status-offline": "Offline",
     "eurom-status-stale": "Verouderde gegevens",
@@ -6096,6 +6107,15 @@ const FALLBACK_TRANSLATIONS = {
     "helty-status-stale": "Stale data",
     "helty-status-hub-disabled": "Hub disabled",
     "helty-btn-refresh": "Refresh",
+    "helty-tx-fan-mode": "Fan mode",
+    "helty-tx-indoor-temp": "Indoor temp",
+    "helty-tx-outdoor-temp": "Outdoor temp",
+    "helty-tx-humidity": "Humidity",
+    "helty-tx-co2": "CO2",
+    "helty-tx-voc": "VOC",
+    "helty-tx-filter-hours": "Filter hours",
+    "helty-tx-last-update": "Last update",
+    "helty-tx-none": "No telemetry yet.",
     "eurom-status-online": "Online",
     "eurom-status-offline": "Offline",
     "eurom-status-stale": "Stale data",
@@ -6158,6 +6178,15 @@ const FALLBACK_TRANSLATIONS = {
     "helty-status-stale": "Veraltete Daten",
     "helty-status-hub-disabled": "Hub deaktiviert",
     "helty-btn-refresh": "Aktualisieren",
+    "helty-tx-fan-mode": "Lüftermodus",
+    "helty-tx-indoor-temp": "Innentemperatur",
+    "helty-tx-outdoor-temp": "Außentemperatur",
+    "helty-tx-humidity": "Luftfeuchtigkeit",
+    "helty-tx-co2": "CO2",
+    "helty-tx-voc": "VOC",
+    "helty-tx-filter-hours": "Filterstunden",
+    "helty-tx-last-update": "Letzte Aktualisierung",
+    "helty-tx-none": "Noch keine Telemetrie.",
     "eurom-status-online": "Online",
     "eurom-status-offline": "Offline",
     "eurom-status-stale": "Veraltete Daten",
@@ -6220,6 +6249,15 @@ const FALLBACK_TRANSLATIONS = {
     "helty-status-stale": "Föråldrad data",
     "helty-status-hub-disabled": "Hubb inaktiverad",
     "helty-btn-refresh": "Uppdatera",
+    "helty-tx-fan-mode": "Fläktläge",
+    "helty-tx-indoor-temp": "Innetemp",
+    "helty-tx-outdoor-temp": "Utetemp",
+    "helty-tx-humidity": "Luftfuktighet",
+    "helty-tx-co2": "CO2",
+    "helty-tx-voc": "VOC",
+    "helty-tx-filter-hours": "Filtertimmar",
+    "helty-tx-last-update": "Senaste uppdatering",
+    "helty-tx-none": "Ingen telemetri ännu.",
     "eurom-status-online": "Online",
     "eurom-status-offline": "Offline",
     "eurom-status-stale": "Föråldrad data",

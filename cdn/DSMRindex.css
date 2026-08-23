@@ -1276,30 +1276,46 @@ select#languageSelector {background-color: unset; color: #fff; border: none;colo
   background: #fff;
 }
 
-.helty-panel {
-  max-width: 720px;
-  margin: 0 auto;
-  padding: 12px 16px 24px;
-}
+/* ================== HUB PAGES (Helty / EUROM / WiZ) ================== */
+/* Reuse Solar #eid-setup, Dash .card/.outer, Settings pane colors, global tables/buttons. */
 
 #HeltyDiscover #eid-setup,
-#HeltyManagement #eid-setup,
 #EuromDiscover #eid-setup,
-#EuromManagement #eid-setup {
+#WizLights #eid-setup {
   max-width: 720px;
 }
 
-.helty-actions button {
-  margin: 4px 6px;
+#HeltyDiscover h1,
+#EuromDiscover h1,
+#WizLights #eid-setup h1 {
+  margin-top: 0;
 }
 
-.helty-status {
+#HeltyManagement,
+#EuromManagement {
+  width: min(720px, calc(100vw - 24px));
+}
+
+#WizLights {
+  width: min(900px, calc(100vw - 24px));
+}
+
+#HeltyManagement > h2,
+#EuromManagement > h2,
+#WizLights > h2 {
+  text-align: center;
+  margin-bottom: 6px;
+}
+
+.helty-status,
+.wiz-status {
   margin-top: 12px;
-  color: #333;
 }
 
-.helty-status.helty-error {
+.helty-status.helty-error,
+.wiz-status.wiz-error {
   color: #b00020;
+  font-weight: bold;
 }
 
 .helty-status-header {
@@ -1316,10 +1332,10 @@ select#languageSelector {background-color: unset; color: #fff; border: none;colo
   gap: 12px;
   flex: 1;
   min-width: 0;
-  padding: 12px 14px;
-  border-radius: 12px;
-  background: #f7f9fc;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+  padding: 10px 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(0,0,0,0.08);
+  background: #c3c3c3;
 }
 
 .helty-status-bar .helty-status-icon {
@@ -1340,49 +1356,33 @@ select#languageSelector {background-color: unset; color: #fff; border: none;colo
 .helty-status-device {
   margin-top: 4px;
   font-size: 13px;
-  color: #666;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .helty-status-bar.helty-ok {
-  background: #e7f6ea;
-  color: #1b5e20;
-}
-
-.helty-status-bar.helty-ok .helty-status-device {
-  color: #2e7d32;
+  background: rgb(112,172,77);
+  color: #fff;
 }
 
 .helty-status-bar.helty-warn {
-  background: #fff3e0;
-  color: #e65100;
-}
-
-.helty-status-bar.helty-warn .helty-status-device {
-  color: #bf360c;
+  background: #ff7800;
+  color: #fff;
 }
 
 .helty-status-bar.helty-error {
-  background: #ffebee;
-  color: #b71c1c;
+  background: #b00020;
+  color: #fff;
 }
 
-.helty-status-bar.helty-error .helty-status-device {
-  color: #c62828;
-}
-
-#helty_refresh_btn {
+#helty_refresh_btn,
+#eurom_refresh_btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
   margin: 0;
-}
-
-#helty_refresh_btn .iconify {
-  font-size: 18px;
 }
 
 @media (max-width: 480px) {
@@ -1391,63 +1391,53 @@ select#languageSelector {background-color: unset; color: #fff; border: none;colo
     align-items: stretch;
   }
 
-  #helty_refresh_btn {
+  #helty_refresh_btn,
+  #eurom_refresh_btn {
     justify-content: center;
   }
 }
 
-.helty-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 12px;
-  margin-top: 12px;
-}
-
-.helty-card {
-  background: #f7f9fc;
-  border-radius: 12px;
-  padding: 12px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
-}
-
-.helty-card-label {
-  font-size: 12px;
-  color: #666;
-  margin-bottom: 6px;
-}
-
-.helty-card-value {
-  font-size: 20px;
-  font-weight: 700;
-}
-
-.helty-table {
-  width: 100%;
-  margin-top: 12px;
-  border-collapse: collapse;
-}
-
-.helty-table th,
-.helty-table td {
-  padding: 8px;
-  border-bottom: 1px solid rgba(0,0,0,0.08);
-  text-align: left;
-}
-
-.helty-section-title {
+#HeltyManagement .outer,
+#EuromManagement .outer {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 16px 0 12px;
-  font-size: 18px;
-  color: #333;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+#HeltyManagement .card h1,
+#EuromManagement .card h1,
+#WizLights .card h1 {
+  position: relative;
+  text-align: center;
+  padding: 0.5rem 1.1rem;
+  background: #314b77;
+  margin: 0;
+  font-size: 1.1rem;
+  color: white !important;
+}
+
+#HeltyManagement .card h2,
+#EuromManagement .card h2 {
+  text-align: center;
+  font-size: 1.6rem;
+  padding: 0.4rem 0.2rem;
+  margin: 0;
+  color: #666;
+}
+
+#helty_scan_results th,
+#eurom_scan_results th,
+#wiz_scan_table th {
+  text-align: left;
+  border-bottom: 2px solid #ddd;
 }
 
 .helty-ctrl-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 10px;
-  margin: 12px 0;
+  margin: 12px auto;
+  max-width: 720px;
 }
 
 .helty-ctrl-btn {
@@ -1458,20 +1448,18 @@ select#languageSelector {background-color: unset; color: #fff; border: none;colo
   gap: 6px;
   min-height: 88px;
   padding: 10px 6px;
-  border: 1px solid rgba(0,0,0,0.10);
-  border-radius: 12px;
-  background: #fff;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
-  cursor: pointer;
-  font-family: inherit;
+  margin-right: 0;
+  background-color: rgb(112,172,77);
+  border-radius: 15px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .6);
+  color: #fff;
   font-size: 12px;
-  color: #333;
-  transition: border-color 0.15s, background 0.15s;
 }
 
 .helty-ctrl-btn .helty-ctrl-icon {
   font-size: 28px;
-  color: #1976d2;
+  color: #fff;
+  margin: 0;
 }
 
 .helty-ctrl-btn .helty-ctrl-label {
@@ -1480,8 +1468,8 @@ select#languageSelector {background-color: unset; color: #fff; border: none;colo
 }
 
 .helty-ctrl-btn.helty-ctrl-active {
-  border-color: #1976d2;
-  background: #e3f2fd;
+  background: #314b77;
+  filter: none;
 }
 
 .helty-ctrl-btn:disabled {
@@ -1493,18 +1481,6 @@ select#languageSelector {background-color: unset; color: #fff; border: none;colo
   .helty-ctrl-grid {
     grid-template-columns: repeat(2, 1fr);
   }
-}
-
-.wiz-hint {
-  font-size: 0.9rem;
-  color: #666;
-  margin: 0 0 8px;
-}
-
-.wiz-panel {
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 12px 16px 24px;
 }
 
 .wiz-toolbar {
@@ -1519,42 +1495,23 @@ select#languageSelector {background-color: unset; color: #fff; border: none;colo
   margin: 0;
 }
 
-.wiz-status {
-  margin: 8px 0;
-  color: #333;
-}
-
-.wiz-status.wiz-error {
-  color: #b00020;
-}
-
-.wiz-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin: 8px 0;
-}
-
-.wiz-table th, .wiz-table td {
-  border: 1px solid rgba(0,0,0,0.1);
-  padding: 6px 8px;
-  text-align: left;
-}
-
-.wiz-actions {
-  margin: 8px 0 16px;
+.wiz-mac-cell {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
 }
 
 .wiz-grid {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  margin-top: 12px;
 }
 
 .wiz-room {
-  border: 1px solid rgba(0,0,0,0.1);
-  border-radius: 8px;
-  padding: 10px 12px 12px;
-  background: #fafafa;
+  background: #c3c3c3;
+  border: 1px solid rgba(0,0,0,0.08);
+  border-radius: 16px;
+  padding: 10px;
 }
 
 .wiz-room-head {
@@ -1571,7 +1528,6 @@ select#languageSelector {background-color: unset; color: #fff; border: none;colo
 
 .wiz-room-title {
   font-weight: 600;
-  color: #444;
 }
 
 .wiz-room-name-input {
@@ -1588,64 +1544,39 @@ select#languageSelector {background-color: unset; color: #fff; border: none;colo
 
 .wiz-room-actions button {
   margin: 0;
-  font-size: 0.85rem;
 }
 
 .wiz-room-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 12px;
-}
-
-.wiz-card {
-  border: 1px solid rgba(0,0,0,0.12);
-  border-radius: 8px;
-  padding: 10px 12px;
-  background: #fff;
-}
-
-.wiz-card.wiz-online {
-  border-left: 4px solid #2e7d32;
-}
-
-.wiz-card.wiz-off {
-  border-left: 4px solid #ff9800;
-}
-
-.wiz-card.wiz-offline {
-  border-left: 4px solid #9e9e9e;
-  opacity: 0.85;
-}
-
-.wiz-probe-row {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin: 8px 0 12px;
+  justify-content: center;
 }
 
-.wiz-probe-input {
-  width: 140px;
-  max-width: 100%;
+#WizLights .wiz-card {
+  max-width: 280px;
+  min-width: 240px;
+}
+
+#WizLights .card.wiz-online h1 {
+  background: rgb(112,172,77);
+}
+
+#WizLights .card.wiz-off h1 {
+  background: #ff7800;
+}
+
+#WizLights .card.wiz-offline h1 {
+  background: #777;
+}
+
+.wiz-card-body {
+  padding: 10px 12px 4px;
 }
 
 .wiz-card-head {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.wiz-badge {
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  color: #666;
-}
-
-.wiz-mac-cell {
-  font-family: monospace;
-  font-size: 0.85rem;
-  color: #666;
 }
 
 .wiz-title-block {
@@ -1662,17 +1593,38 @@ select#languageSelector {background-color: unset; color: #fff; border: none;colo
   font-weight: 600;
 }
 
-.wiz-room-input {
-  font-size: 0.85rem;
-  color: #555;
+.wiz-card-meta {
+  font-size: 0.8rem;
+  color: #666;
+  margin: 6px 0;
 }
 
-.wiz-rgb-controls {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid rgba(0,0,0,0.08);
+.wiz-card-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
+.wiz-dim {
+  flex: 1;
+}
+
+.wiz-remove {
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  font-size: 1.2rem;
+  cursor: pointer;
+  color: #888;
+  margin: 0;
+  padding: 4px 8px;
+}
+
+.wiz-empty {
+  color: #666;
+}
+
+.wiz-rgb-controls,
 .wiz-cct-controls {
   margin-top: 10px;
   padding-top: 10px;
@@ -1771,31 +1723,4 @@ select#languageSelector {background-color: unset; color: #fff; border: none;colo
   border-radius: 4px;
 }
 
-.wiz-remove {
-  border: none;
-  background: transparent;
-  font-size: 1.2rem;
-  cursor: pointer;
-  color: #888;
-}
-
-.wiz-card-meta {
-  font-size: 0.8rem;
-  color: #666;
-  margin: 6px 0;
-}
-
-.wiz-card-controls {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.wiz-dim {
-  flex: 1;
-}
-
-.wiz-empty {
-  color: #666;
-}
 
