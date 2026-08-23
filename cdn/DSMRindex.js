@@ -942,9 +942,21 @@ let euromScanTimer = null;
 let euromScanTimeoutTimer = null;
 let euromTestTimer = null;
 let euromManagementTimer = null;
+let euromCommandTimer = null;
+let euromCommandStartedAt = 0;
+let euromLastCommandPayload = null;
+let euromUiState = { on: false, setpoint_c: null };
 const EUROM_SCAN_TIMEOUT_MS = 5 * 60 * 1000;
 const EUROM_SCAN_POLL_MS = 1000;
 const EUROM_MANAGEMENT_POLL_MS = 10000;
+const EUROM_CMD_IDLE = 0;
+const EUROM_CMD_RUNNING = 1;
+const EUROM_CMD_DONE = 2;
+const EUROM_CMD_ERROR = 3;
+const EUROM_CMD_POLL_MS = 1000;
+const EUROM_CMD_TIMEOUT_MS = 20000;
+const EUROM_SETPOINT_MIN = 0;
+const EUROM_SETPOINT_MAX = 37;
 
 function euromApi(path, method, body) {
   const opts = { method: method || "GET", headers: { "Content-Type": "application/json" } };
@@ -1221,9 +1233,10 @@ function euromRefreshLive() {
   const refreshBtn = document.getElementById("eurom_refresh_btn");
   if (refreshBtn) refreshBtn.disabled = true;
   return euromApi("/api/v2/eurom/live").then(json => {
-    euromSetStatus("eurom_manage_message", "", false);
+    if (!euromCommandTimer) euromSetStatus("eurom_manage_message", "", false);
     euromUpdateStatusBadge(json);
     euromUpdateTelemetryGrid(json);
+    euromSeedUiState(json);
     return json;
   }).catch(err => {
     euromSetStatus("eurom_manage_message", "Refresh failed: " + err, true);
@@ -1232,7 +1245,123 @@ function euromRefreshLive() {
   });
 }
 
+function euromSeedUiState(json) {
+  if (json && json.on !== undefined) euromUiState.on = !!json.on;
+  if (json && json.setpoint_c !== undefined && json.setpoint_c !== null) {
+    euromUiState.setpoint_c = parseInt(json.setpoint_c, 10);
+  }
+  euromRenderControls();
+}
+
+function euromRenderControls() {
+  document.querySelectorAll("#eurom_ctrl_grid [data-action]").forEach(btn => {
+    const action = btn.dataset.action;
+    btn.classList.toggle("helty-ctrl-active",
+      (action === "on" && euromUiState.on) || (action === "off" && !euromUiState.on));
+  });
+  const valueEl = document.getElementById("eurom_setpoint_value");
+  if (valueEl) {
+    valueEl.textContent = Number.isFinite(euromUiState.setpoint_c)
+      ? euromUiState.setpoint_c + " °C"
+      : "—";
+  }
+}
+
+function euromSetControlsDisabled(disabled) {
+  document.querySelectorAll("#eurom_ctrl_grid .helty-ctrl-btn, .eurom-setpoint-btn").forEach(btn => {
+    btn.disabled = !!disabled;
+  });
+}
+
+function euromFinishCommand(successMsg, failureMsg, isError) {
+  if (euromCommandTimer) clearInterval(euromCommandTimer);
+  euromCommandTimer = null;
+  euromCommandStartedAt = 0;
+  euromSetControlsDisabled(false);
+  euromSetStatus("eurom_manage_message", isError ? failureMsg : successMsg, isError);
+  euromLastCommandPayload = null;
+  euromRefreshLive();
+}
+
+function euromPollCommandStatus(successMsg, failurePrefix) {
+  if (euromCommandStartedAt && (Date.now() - euromCommandStartedAt) > EUROM_CMD_TIMEOUT_MS) {
+    euromFinishCommand(successMsg, t("eurom-cmd-timeout") || (failurePrefix + " (timeout)"), true);
+    return;
+  }
+
+  euromApi("/api/v2/eurom/command")
+    .then(json => {
+      if (json.phase === EUROM_CMD_RUNNING) {
+        euromSetControlsDisabled(true);
+        euromSetStatus("eurom_manage_message", t("eurom-cmd-sending"), false);
+      } else if (json.phase === EUROM_CMD_DONE && json.ok) {
+        euromFinishCommand(successMsg, json.error || failurePrefix, false);
+      } else if (json.phase === EUROM_CMD_ERROR || (json.phase === EUROM_CMD_DONE && !json.ok)) {
+        euromFinishCommand(successMsg, json.error || failurePrefix, true);
+      }
+    })
+    .catch(err => {
+      euromFinishCommand(successMsg, failurePrefix + ": " + err, true);
+    });
+}
+
+function euromStartCommand(payload, successMsg, failurePrefix) {
+  euromLastCommandPayload = payload;
+  euromApi("/api/v2/eurom/command", "POST", payload)
+    .then(() => {
+      if (euromCommandTimer) clearInterval(euromCommandTimer);
+      euromCommandStartedAt = Date.now();
+      euromSetControlsDisabled(true);
+      euromCommandTimer = setInterval(() => euromPollCommandStatus(successMsg, failurePrefix), EUROM_CMD_POLL_MS);
+      euromPollCommandStatus(successMsg, failurePrefix);
+    })
+    .catch(err => {
+      euromSetControlsDisabled(false);
+      euromSetStatus("eurom_manage_message", failurePrefix + ": " + err, true);
+      euromLastCommandPayload = null;
+    });
+}
+
+function euromSendPower(on) {
+  if (euromCommandTimer) return;
+  euromUiState.on = !!on;
+  euromRenderControls();
+  euromStartCommand({ on: !!on }, t("eurom-cmd-ok"), t("eurom-cmd-fail"));
+}
+
+function euromSendSetpoint(next) {
+  if (euromCommandTimer) return;
+  const value = Math.max(EUROM_SETPOINT_MIN, Math.min(EUROM_SETPOINT_MAX, next | 0));
+  euromUiState.setpoint_c = value;
+  euromRenderControls();
+  euromStartCommand({ setpoint_c: value }, t("eurom-cmd-ok"), t("eurom-cmd-fail"));
+}
+
+function initEuromControlGrid() {
+  const grid = document.getElementById("eurom_ctrl_grid");
+  if (grid && !grid.dataset.bound) {
+    grid.dataset.bound = "1";
+    grid.addEventListener("click", event => {
+      const btn = event.target.closest(".helty-ctrl-btn");
+      if (!btn || btn.disabled) return;
+      if (btn.dataset.action === "on") euromSendPower(true);
+      else if (btn.dataset.action === "off") euromSendPower(false);
+    });
+  }
+  document.querySelectorAll(".eurom-setpoint-btn").forEach(btn => {
+    if (btn.dataset.bound) return;
+    btn.dataset.bound = "1";
+    btn.addEventListener("click", () => {
+      if (btn.disabled) return;
+      const current = Number.isFinite(euromUiState.setpoint_c) ? euromUiState.setpoint_c : 18;
+      if (btn.dataset.action === "setpoint-down") euromSendSetpoint(current - 1);
+      else if (btn.dataset.action === "setpoint-up") euromSendSetpoint(current + 1);
+    });
+  });
+}
+
 function euromStartManagement() {
+  initEuromControlGrid();
   euromRefreshLive();
   if (euromManagementTimer) clearInterval(euromManagementTimer);
   euromManagementTimer = setInterval(euromRefreshLive, EUROM_MANAGEMENT_POLL_MS);
@@ -2995,6 +3124,7 @@ function bootsTrapMain()
 		}
     document.getElementById('dongle_io').addEventListener('input', NTSWupdateVisibility);
  	initHeltyControlGrid();
+	initEuromControlGrid();
  	
  	BurnupBootstrap();
  	

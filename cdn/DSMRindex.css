@@ -1483,6 +1483,38 @@ select#languageSelector {background-color: unset; color: #fff; border: none;colo
   }
 }
 
+.eurom-setpoint-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin: 12px auto 4px;
+  max-width: 360px;
+}
+
+.eurom-setpoint-btn {
+  min-height: 72px;
+  min-width: 72px;
+}
+
+.eurom-setpoint-value {
+  min-width: 6.5rem;
+  text-align: center;
+}
+
+#eurom_setpoint_value {
+  font-size: 1.8rem;
+  font-weight: 700;
+  line-height: 1.2;
+  color: #314b77;
+}
+
+.eurom-setpoint-label {
+  margin-top: 4px;
+  font-size: 0.95rem;
+  color: #666;
+}
+
 .wiz-toolbar {
   display: flex;
   flex-wrap: wrap;

@@ -925,7 +925,6 @@
 
 	<section id="EuromManagement" class="tabName">
 		<h2 class="align-c" data-i18n-key="eurom-management-title">EUROM Management</h2>
-		<p class="align-c" data-i18n-key="eurom-readonly-hint">Read-only status. Use the EUROM Smart app to change setpoint or power.</p>
 		<div class="helty-status-header">
 			<div id="eurom_status_badge" class="helty-status-bar">...</div>
 			<button type="button" id="eurom_refresh_btn" onclick="euromRefreshLive()">
@@ -934,6 +933,30 @@
 			</button>
 		</div>
 		<div id="eurom_telemetry" class="outer"></div>
+		<hr>
+		<h3 class="align-c"><span class="iconify" data-icon="mdi-tune-variant"></span> <span data-i18n-key="eurom-controls">Controls</span></h3>
+		<div id="eurom_ctrl_grid" class="helty-ctrl-grid">
+			<button type="button" class="helty-ctrl-btn" data-action="on">
+				<span class="iconify helty-ctrl-icon" data-icon="mdi-power"></span>
+				<span class="helty-ctrl-label" data-i18n-key="eurom-btn-on">On</span>
+			</button>
+			<button type="button" class="helty-ctrl-btn" data-action="off">
+				<span class="iconify helty-ctrl-icon" data-icon="mdi-power-off"></span>
+				<span class="helty-ctrl-label" data-i18n-key="eurom-btn-off">Off</span>
+			</button>
+		</div>
+		<div class="eurom-setpoint-row">
+			<button type="button" class="helty-ctrl-btn eurom-setpoint-btn" data-action="setpoint-down" aria-label="-">
+				<span class="iconify helty-ctrl-icon" data-icon="mdi-minus"></span>
+			</button>
+			<div class="eurom-setpoint-value">
+				<div id="eurom_setpoint_value">—</div>
+				<div class="eurom-setpoint-label" data-i18n-key="eurom-setpoint-label">Setpoint</div>
+			</div>
+			<button type="button" class="helty-ctrl-btn eurom-setpoint-btn" data-action="setpoint-up" aria-label="+">
+				<span class="iconify helty-ctrl-icon" data-icon="mdi-plus"></span>
+			</button>
+		</div>
 		<div id="eurom_manage_message" class="helty-status"></div>
     </section>
 
