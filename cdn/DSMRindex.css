@@ -1283,7 +1283,9 @@ select#languageSelector {background-color: unset; color: #fff; border: none;colo
 }
 
 #HeltyDiscover #eid-setup,
-#HeltyManagement #eid-setup {
+#HeltyManagement #eid-setup,
+#EuromDiscover #eid-setup,
+#EuromManagement #eid-setup {
   max-width: 720px;
 }
 

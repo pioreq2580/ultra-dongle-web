@@ -33,6 +33,11 @@
           <li><a id='bHeltyManagement' data-i18n-key="mnu-helty-management" class='tabButton nav-item' href="#HeltyManagement">Management</a></li>
         </ul></li>
 	  <li><a id='bWizLights' data-i18n-key="mnu-wiz" class='tabButton nav-item' href="#WizLights">Lights</a></li>
+	  <li><a id='bEuromTab' data-i18n-key="mnu-eurom" href="javascript:void(0);">EUROM</a>
+        <ul>
+          <li><a id='bEuromDiscover' data-i18n-key="mnu-eurom-discover" class='tabButton nav-item' href="#EuromDiscover">Discover</a></li>
+          <li><a id='bEuromManagement' data-i18n-key="mnu-eurom-management" class='tabButton nav-item' href="#EuromManagement">Management</a></li>
+        </ul></li>
 	  	  
       <li><a id='bHoursTab'     data-i18n-key="mnu-hour" class='tabButton nav-item' href="#HoursTab" >Uur</a></li>
       <li><a id='bDaysTab'      data-i18n-key="mnu-day" class='tabButton nav-item' href="#DaysTab" >Dag</a></li>
@@ -872,6 +877,67 @@
 			</button>
 		</div>
 		<div id="helty_manage_message" class="helty-status"></div>
+		</div>
+    </section>
+
+	<section id="EuromDiscover" class="tabName">
+		<div id="eid-setup">
+		<h1 class="align-c" data-i18n-key="eurom-discover-title">EUROM Discover</h1>
+		<p data-i18n-key="eurom-discover-intro">Connect one EUROM Sani IR panel on your LAN (Tuya TCP port 6668). Scan finds host and device id. The local key cannot be invented — paste it from tinytuya / EUROM Smart.</p>
+		<hr>
+		<label for="eurom_name" data-i18n-key="eurom-name">Name</label><br>
+		<input type="text" id="eurom_name" placeholder="Bathroom" style="width:100%"><br><br>
+		<label for="eurom_host" data-i18n-key="eurom-host">Host / IP address</label><br>
+		<input type="text" id="eurom_host" placeholder="192.168.1.40" style="width:100%"><br><br>
+		<label for="eurom_port" data-i18n-key="eurom-port">Port</label><br>
+		<input type="number" id="eurom_port" value="6668"><br><br>
+		<label for="eurom_device_id" data-i18n-key="eurom-device-id">Device ID</label><br>
+		<input type="text" id="eurom_device_id" placeholder="bfxxxxxxxx" style="width:100%"><br><br>
+		<label for="eurom_local_key" data-i18n-key="eurom-local-key">Local key</label><br>
+		<input type="password" id="eurom_local_key" autocomplete="off" placeholder="" style="width:100%"><br>
+		<div id="eurom_key_hint" class="helty-status"></div><br>
+		<label for="eurom_protocol" data-i18n-key="eurom-protocol">Protocol</label><br>
+		<select id="eurom_protocol">
+			<option value="3.3">3.3</option>
+			<option value="3.4">3.4</option>
+			<option value="3.5">3.5</option>
+		</select><br><br>
+		<label for="eurom_poll" data-i18n-key="eurom-poll-interval">Poll interval (seconds)</label><br>
+		<input type="number" id="eurom_poll" value="30" min="10"><br><br>
+		<label><input type="checkbox" id="eurom_enabled"> <span data-i18n-key="eurom-enabled">Enable EUROM hub</span></label>
+		<hr>
+		<div class="helty-actions align-c">
+			<button type="button" onclick="euromTest()" data-i18n-key="eurom-btn-test">Test connection</button>
+			<button type="button" onclick="euromScan()" data-i18n-key="eurom-btn-scan">Scan network</button>
+			<button type="button" onclick="euromSave()" data-i18n-key="btn-save">Save</button>
+		</div>
+		<div id="eurom_discover_status" class="helty-status"></div>
+		<div id="eurom_scan_progress" class="helty-status"></div>
+		<table id="eurom_scan_results" class="helty-table" style="display:none">
+			<thead><tr>
+				<th data-i18n-key="eurom-col-host">Host</th>
+				<th data-i18n-key="eurom-col-device">Device ID</th>
+				<th data-i18n-key="eurom-col-version">Version</th>
+				<th></th>
+			</tr></thead>
+			<tbody id="eurom_scan_results_body"></tbody>
+		</table>
+		</div>
+    </section>
+
+	<section id="EuromManagement" class="tabName">
+		<div id="eid-setup">
+		<h1 class="align-c" data-i18n-key="eurom-management-title">EUROM Management</h1>
+		<p data-i18n-key="eurom-readonly-hint">Read-only status. Use the EUROM Smart app to change setpoint or power.</p>
+		<div class="helty-status-header">
+			<div id="eurom_status_badge" class="helty-status-bar">...</div>
+			<button type="button" id="eurom_refresh_btn" onclick="euromRefreshLive()">
+				<span class="iconify" data-icon="mdi-refresh"></span>
+				<span data-i18n-key="eurom-btn-refresh">Refresh</span>
+			</button>
+		</div>
+		<div id="eurom_telemetry" class="helty-grid"></div>
+		<div id="eurom_manage_message" class="helty-status"></div>
 		</div>
     </section>
 

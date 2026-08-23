@@ -938,6 +938,318 @@ function heltyStartDiscover() {
   });
 }
 
+let euromScanTimer = null;
+let euromScanTimeoutTimer = null;
+let euromTestTimer = null;
+let euromManagementTimer = null;
+const EUROM_SCAN_TIMEOUT_MS = 5 * 60 * 1000;
+const EUROM_SCAN_POLL_MS = 1000;
+const EUROM_MANAGEMENT_POLL_MS = 10000;
+
+function euromApi(path, method, body) {
+  const opts = { method: method || "GET", headers: { "Content-Type": "application/json" } };
+  if (body !== undefined) opts.body = JSON.stringify(body);
+  return fetch(APIHOST + path, opts).then(async r => {
+    const text = await r.text();
+    if (!r.ok) throw new Error(text || ("HTTP " + r.status));
+    try { return JSON.parse(text); }
+    catch { throw new Error("Invalid JSON from device"); }
+  });
+}
+
+function euromSetStatus(elId, text, isError) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  el.textContent = text || "";
+  el.className = "helty-status" + (isError ? " helty-error" : "");
+}
+
+function fetchEuromConfig() {
+  return euromApi("/api/v2/eurom/config").then(json => {
+    document.getElementById("eurom_host").value = json.host || "";
+    document.getElementById("eurom_port").value = json.port || 6668;
+    document.getElementById("eurom_poll").value = json.poll_interval_sec || 30;
+    document.getElementById("eurom_enabled").checked = !!json.enabled;
+    document.getElementById("eurom_name").value = json.name || "";
+    document.getElementById("eurom_device_id").value = json.device_id || "";
+    document.getElementById("eurom_protocol").value = json.protocol || "3.3";
+    const hint = document.getElementById("eurom_key_hint");
+    if (hint) hint.textContent = json.local_key_set ? t("eurom-key-set") : t("eurom-key-missing");
+    return json;
+  }).catch(err => {
+    console.error("EUROM config load failed", err);
+  });
+}
+
+function euromSave() {
+  const payload = {
+    enabled: document.getElementById("eurom_enabled").checked,
+    host: document.getElementById("eurom_host").value.trim(),
+    port: parseInt(document.getElementById("eurom_port").value, 10) || 6668,
+    poll_interval_sec: parseInt(document.getElementById("eurom_poll").value, 10) || 30,
+    name: document.getElementById("eurom_name").value.trim(),
+    device_id: document.getElementById("eurom_device_id").value.trim(),
+    protocol: document.getElementById("eurom_protocol").value || "3.3"
+  };
+  const key = document.getElementById("eurom_local_key").value.trim();
+  if (key) payload.local_key = key;
+  euromApi("/api/v2/eurom/config", "POST", payload)
+    .then(() => {
+      document.getElementById("eurom_local_key").value = "";
+      euromSetStatus("eurom_discover_status", t("eurom-saved"), false);
+      fetchEuromConfig();
+      if (payload.host) euromTest();
+    })
+    .catch(err => euromSetStatus("eurom_discover_status", "Save failed: " + err, true));
+}
+
+function euromTest() {
+  const host = document.getElementById("eurom_host").value.trim();
+  const port = parseInt(document.getElementById("eurom_port").value, 10) || 6668;
+  if (!host) {
+    euromSetStatus("eurom_discover_status", t("eurom-host-required"), true);
+    return;
+  }
+  euromSetStatus("eurom_discover_status", t("eurom-testing"), false);
+  euromApi("/api/v2/eurom/discover", "POST", { mode: "test", host, port })
+    .then(() => {
+      if (euromTestTimer) clearInterval(euromTestTimer);
+      euromTestTimer = setInterval(euromPollTestStatus, 2000);
+      euromPollTestStatus();
+    })
+    .catch(err => euromSetStatus("eurom_discover_status", "Test failed: " + err, true));
+}
+
+function euromPollTestStatus() {
+  euromApi("/api/v2/eurom/discover")
+    .then(json => {
+      if (json.phase === 1) {
+        euromSetStatus("eurom_discover_status", t("eurom-testing"), false);
+      } else if (json.phase === 3 && json.test_host) {
+        clearInterval(euromTestTimer);
+        euromTestTimer = null;
+        const extra = json.test_device_id ? " (" + json.test_device_id + ")" : "";
+        const warn = json.error ? " — " + json.error : "";
+        euromSetStatus("eurom_discover_status", t("eurom-test-ok") + extra + warn, false);
+      } else if (json.phase === 4 && json.test_host) {
+        clearInterval(euromTestTimer);
+        euromTestTimer = null;
+        euromSetStatus("eurom_discover_status", json.error || t("eurom-test-fail"), true);
+      }
+    })
+    .catch(err => {
+      clearInterval(euromTestTimer);
+      euromTestTimer = null;
+      euromSetStatus("eurom_discover_status", "Test failed: " + err, true);
+    });
+}
+
+function euromSetDiscoverButtonsDisabled(disabled) {
+  document.querySelectorAll("#EuromDiscover button").forEach(btn => {
+    btn.disabled = !!disabled;
+  });
+}
+
+function euromStopDiscoverPolling() {
+  if (euromScanTimer) {
+    clearInterval(euromScanTimer);
+    euromScanTimer = null;
+  }
+  if (euromScanTimeoutTimer) {
+    clearTimeout(euromScanTimeoutTimer);
+    euromScanTimeoutTimer = null;
+  }
+  if (euromTestTimer) {
+    clearInterval(euromTestTimer);
+    euromTestTimer = null;
+  }
+  euromSetDiscoverButtonsDisabled(false);
+}
+
+function euromFinishScan(message, isError) {
+  euromStopDiscoverPolling();
+  euromSetStatus("eurom_scan_progress", message, isError);
+}
+
+function euromSelectResult(item) {
+  if (!item) return;
+  if (item.host) document.getElementById("eurom_host").value = item.host;
+  if (item.device_id) document.getElementById("eurom_device_id").value = item.device_id;
+  const ver = String(item.version || "");
+  if (ver.indexOf("3.5") === 0) document.getElementById("eurom_protocol").value = "3.5";
+  else if (ver.indexOf("3.4") === 0) document.getElementById("eurom_protocol").value = "3.4";
+  else if (ver.indexOf("3.3") === 0 || ver.indexOf("3.1") === 0 || ver.indexOf("3.2") === 0) {
+    document.getElementById("eurom_protocol").value = "3.3";
+  }
+  euromSetStatus("eurom_discover_status", t("eurom-selected") + " " + (item.host || "") + (item.device_id ? " / " + item.device_id : ""), false);
+}
+
+function euromRenderScanResults(results) {
+  const table = document.getElementById("eurom_scan_results");
+  const body = document.getElementById("eurom_scan_results_body");
+  if (!table || !body) return;
+  body.innerHTML = "";
+  if (!results || !results.length) {
+    table.style.display = "none";
+    return;
+  }
+  results.forEach(item => {
+    const row = document.createElement("tr");
+    row.innerHTML = `<td>${item.host || "-"}</td><td>${item.device_id || "-"}</td><td>${item.version || item.source || "-"}</td><td><button type="button">Select</button></td>`;
+    row.querySelector("button").onclick = () => euromSelectResult(item);
+    body.appendChild(row);
+  });
+  table.style.display = "";
+}
+
+function euromPollScanStatus() {
+  euromApi("/api/v2/eurom/discover")
+    .then(json => {
+      if (json.phase === 0) {
+        euromSetStatus("eurom_scan_progress", t("eurom-scan-queued"), false);
+      } else if (json.phase === 1) {
+        euromFinishScan(t("eurom-busy"), true);
+      } else if (json.phase === 2) {
+        const partial = json.results || [];
+        if (partial.length) euromRenderScanResults(partial);
+        const foundNote = partial.length
+          ? " — " + partial.length + " " + t("eurom-found")
+          : "";
+        euromSetStatus("eurom_scan_progress", t("eurom-scanning") + " " + (json.progress || 0) + "%" + foundNote, false);
+      } else if (json.phase === 3) {
+        const results = json.results || [];
+        euromFinishScan(results.length ? t("eurom-scan-done") : t("eurom-scan-empty"), false);
+        euromRenderScanResults(results);
+        if (results.length === 1) euromSelectResult(results[0]);
+      } else if (json.phase === 4) {
+        euromFinishScan(json.error || t("eurom-scan-fail"), true);
+      }
+    })
+    .catch(err => {
+      euromFinishScan("Scan status failed: " + err, true);
+    });
+}
+
+function euromScan() {
+  if (euromScanTimer) return;
+  euromSetStatus("eurom_scan_progress", t("eurom-scan-start"), false);
+  document.getElementById("eurom_scan_results").style.display = "none";
+  euromSetDiscoverButtonsDisabled(true);
+  euromApi("/api/v2/eurom/discover", "POST", { mode: "scan" })
+    .then(() => {
+      euromStopDiscoverPolling();
+      euromSetDiscoverButtonsDisabled(true);
+      euromScanTimer = setInterval(euromPollScanStatus, EUROM_SCAN_POLL_MS);
+      euromPollScanStatus();
+      euromScanTimeoutTimer = setTimeout(() => {
+        if (euromScanTimer) euromFinishScan(t("eurom-scan-timeout"), true);
+      }, EUROM_SCAN_TIMEOUT_MS);
+    })
+    .catch(err => {
+      euromFinishScan("Scan start failed: " + err, true);
+    });
+}
+
+function euromEscapeHtml(str) {
+  return String(str ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function euromUpdateStatusBadge(json) {
+  const statusEl = document.getElementById("eurom_status_badge");
+  if (!statusEl) return;
+  let stateClass;
+  let icon;
+  let label;
+  let deviceLine = "";
+  if (!json.enabled) {
+    stateClass = "helty-warn";
+    icon = "mdi-power-off";
+    label = t("eurom-status-hub-disabled");
+  } else if (json.connected) {
+    stateClass = "helty-ok";
+    icon = "mdi-check-circle";
+    label = t("eurom-status-online");
+    deviceLine = euromEscapeHtml(json.name || json.host || "");
+  } else if (json.valid) {
+    stateClass = "helty-warn";
+    icon = "mdi-clock-alert-outline";
+    label = t("eurom-status-stale");
+    if (json.last_poll_age_sec !== undefined) label += " (" + json.last_poll_age_sec + "s)";
+    deviceLine = euromEscapeHtml(json.name || json.host || "");
+  } else {
+    stateClass = "helty-error";
+    icon = "mdi-lan-disconnect";
+    label = t("eurom-status-offline");
+    if (json.host) deviceLine = euromEscapeHtml(json.host);
+    if (json.error) deviceLine = (deviceLine ? deviceLine + " · " : "") + euromEscapeHtml(json.error);
+  }
+  statusEl.className = "helty-status-bar " + stateClass;
+  statusEl.innerHTML =
+    `<span class="iconify helty-status-icon" data-icon="${icon}"></span>` +
+    `<div class="helty-status-text">` +
+      `<div class="helty-status-label">${euromEscapeHtml(label)}</div>` +
+      (deviceLine ? `<div class="helty-status-device">${deviceLine}</div>` : "") +
+    `</div>`;
+  if (window.Iconify && Iconify.scan) Iconify.scan(statusEl);
+}
+
+function euromUpdateTelemetryGrid(json) {
+  const grid = document.getElementById("eurom_telemetry");
+  if (!grid) return;
+  const dash = t("eurom-none");
+  const card = (label, value, unit) => {
+    const empty = value === undefined || value === null || value === "";
+    const shown = empty ? dash : value;
+    return `<div class="helty-card"><div class="helty-card-label">${euromEscapeHtml(label)}</div><div class="helty-card-value">${euromEscapeHtml(shown)}${!empty && unit ? " " + unit : ""}</div></div>`;
+  };
+  let html = "";
+  html += card(t("eurom-tx-connected"), json.connected ? t("eurom-status-online") : t("eurom-status-offline"));
+  html += card(t("eurom-tx-on"), json.on ? t("eurom-on") : t("eurom-off"));
+  html += card(t("eurom-tx-setpoint"), json.setpoint_c, "°C");
+  html += card(t("eurom-tx-temp"), json.temperature_c, "°C");
+  if (json.unit_f) html += card(t("eurom-tx-unit"), "°F");
+  html += card(t("eurom-tx-timer"), json.timer_min, "min");
+  html += card(t("eurom-tx-timer-on"), json.timer_on === undefined ? "" : (json.timer_on ? t("eurom-on") : t("eurom-off")));
+  html += card(t("eurom-tx-schedule"), json.schedule_mode);
+  if (json.last_poll_age_sec !== undefined) html += card(t("eurom-tx-last-poll"), json.last_poll_age_sec, "s");
+  else html += card(t("eurom-tx-last-poll"), json.last_poll);
+  html += card(t("eurom-tx-error"), json.error);
+  grid.innerHTML = html || `<div class="helty-status">${t("eurom-tx-none")}</div>`;
+}
+
+function euromRefreshLive() {
+  const refreshBtn = document.getElementById("eurom_refresh_btn");
+  if (refreshBtn) refreshBtn.disabled = true;
+  return euromApi("/api/v2/eurom/live").then(json => {
+    euromSetStatus("eurom_manage_message", "", false);
+    euromUpdateStatusBadge(json);
+    euromUpdateTelemetryGrid(json);
+    return json;
+  }).catch(err => {
+    euromSetStatus("eurom_manage_message", "Refresh failed: " + err, true);
+  }).finally(() => {
+    if (refreshBtn) refreshBtn.disabled = false;
+  });
+}
+
+function euromStartManagement() {
+  euromRefreshLive();
+  if (euromManagementTimer) clearInterval(euromManagementTimer);
+  euromManagementTimer = setInterval(euromRefreshLive, EUROM_MANAGEMENT_POLL_MS);
+}
+
+function euromStopManagementPolling() {
+  if (euromManagementTimer) {
+    clearInterval(euromManagementTimer);
+    euromManagementTimer = null;
+  }
+}
+
+function euromStartDiscover() {
+  fetchEuromConfig();
+  euromStopDiscoverPolling();
+}
+
 let wizScanTimer = null;
 let wizPageTimer = null;
 let wizConfiguredLights = [];
@@ -1746,8 +2058,11 @@ window.addEventListener('popstate', function (event) {
 });
 
 window.addEventListener('hashchange', () => {
-  console.log('Hash changed:', window.location.hash);
-  // Handle the hash change here
+  const hash = (location.hash || "").slice(1).split("?")[0];
+  if (!hash || hash === "Redirect" || hash === "UpdateStart" || hash === "Logout" || hash === "Updating") return;
+  const btn = document.getElementById("b" + hash);
+  activeTab = btn ? btn.id : ("b" + hash);
+  openTab();
 });
 
 
@@ -2900,6 +3215,7 @@ function SendNetSwitchJson() {
     clearInterval(tabTimer);  
     clearInterval(NRGStatusTimer);
     heltyStopManagementPolling();
+    euromStopManagementPolling();
     wizStopPolling();
 	if (objDAL) {
 		objDAL.stopDashLivePolling();
@@ -2969,6 +3285,12 @@ function SendNetSwitchJson() {
 			break;
 		case "bWizLights":
 			wizStartPage();
+			break;
+		case "bEuromDiscover":
+			euromStartDiscover();
+			break;
+		case "bEuromManagement":
+			euromStartManagement();
 			break;
     }
   } // openTab()
@@ -5679,8 +6001,7 @@ function handle_menu_click()
 			this.classList.add("active");
 
 			activeTab = this.id;
-			//console.log("ActiveID - " + activeTab );
-// 			openTab();  		
+			openTab();
   		});
 	}
 }
@@ -5712,7 +6033,44 @@ const FALLBACK_TRANSLATIONS = {
     "helty-status-offline": "Offline",
     "helty-status-stale": "Verouderde gegevens",
     "helty-status-hub-disabled": "Hub uitgeschakeld",
-    "helty-btn-refresh": "Vernieuwen"
+    "helty-btn-refresh": "Vernieuwen",
+    "eurom-status-online": "Online",
+    "eurom-status-offline": "Offline",
+    "eurom-status-stale": "Verouderde gegevens",
+    "eurom-status-hub-disabled": "Hub uitgeschakeld",
+    "eurom-btn-refresh": "Vernieuwen",
+    "eurom-key-set": "Er is een local key opgeslagen. Laat leeg om te behouden.",
+    "eurom-key-missing": "Geen local key opgeslagen. Plak de 16-tekens key uit tinytuya.",
+    "eurom-saved": "Configuratie opgeslagen.",
+    "eurom-host-required": "Vul een host of IP-adres in.",
+    "eurom-testing": "Verbinding testen...",
+    "eurom-test-ok": "TCP-poort open",
+    "eurom-test-fail": "Verbinding mislukt",
+    "eurom-selected": "Geselecteerd",
+    "eurom-scan-queued": "Scan in wachtrij...",
+    "eurom-busy": "EUROM-client bezet",
+    "eurom-scanning": "Scannen...",
+    "eurom-found": "apparaat(en)",
+    "eurom-scan-done": "Scan voltooid.",
+    "eurom-scan-empty": "Scan voltooid — geen Tuya/EUROM-broadcasts en geen TCP 6668-hosts gevonden.",
+    "eurom-scan-fail": "Scan mislukt",
+    "eurom-scan-start": "Tuya/EUROM-scan starten...",
+    "eurom-scan-timeout": "Scan time-out",
+    "eurom-tx-on": "Voeding",
+    "eurom-tx-setpoint": "Setpoint",
+    "eurom-tx-temp": "Temperatuur",
+    "eurom-tx-unit": "Eenheid",
+    "eurom-tx-timer": "Timer",
+    "eurom-tx-timer-on": "Timer aan",
+    "eurom-tx-schedule": "Schema",
+    "eurom-tx-last-update": "Laatste update",
+    "eurom-tx-last-poll": "Laatste poll",
+    "eurom-tx-connected": "Verbonden",
+    "eurom-tx-error": "Fout",
+    "eurom-none": "—",
+    "eurom-tx-none": "Nog geen telemetrie.",
+    "eurom-on": "Aan",
+    "eurom-off": "Uit"
   },
   en: {
     "net-action-on": "Switch action",
@@ -5737,7 +6095,44 @@ const FALLBACK_TRANSLATIONS = {
     "helty-status-offline": "Offline",
     "helty-status-stale": "Stale data",
     "helty-status-hub-disabled": "Hub disabled",
-    "helty-btn-refresh": "Refresh"
+    "helty-btn-refresh": "Refresh",
+    "eurom-status-online": "Online",
+    "eurom-status-offline": "Offline",
+    "eurom-status-stale": "Stale data",
+    "eurom-status-hub-disabled": "Hub disabled",
+    "eurom-btn-refresh": "Refresh",
+    "eurom-key-set": "A local key is stored. Leave blank to keep it.",
+    "eurom-key-missing": "Local key is not stored. Paste the 16-character key from tinytuya.",
+    "eurom-saved": "Configuration saved.",
+    "eurom-host-required": "Enter a host or IP address.",
+    "eurom-testing": "Testing connection...",
+    "eurom-test-ok": "TCP port open",
+    "eurom-test-fail": "Connection failed",
+    "eurom-selected": "Selected",
+    "eurom-scan-queued": "Scan queued...",
+    "eurom-busy": "EUROM client busy",
+    "eurom-scanning": "Scanning...",
+    "eurom-found": "device(s)",
+    "eurom-scan-done": "Scan complete.",
+    "eurom-scan-empty": "Scan complete — no Tuya/EUROM broadcasts and no TCP 6668 hosts found.",
+    "eurom-scan-fail": "Scan failed",
+    "eurom-scan-start": "Starting Tuya/EUROM scan...",
+    "eurom-scan-timeout": "Scan timed out",
+    "eurom-tx-on": "Power",
+    "eurom-tx-setpoint": "Setpoint",
+    "eurom-tx-temp": "Temperature",
+    "eurom-tx-unit": "Unit",
+    "eurom-tx-timer": "Timer",
+    "eurom-tx-timer-on": "Timer on",
+    "eurom-tx-schedule": "Schedule",
+    "eurom-tx-last-update": "Last update",
+    "eurom-tx-last-poll": "Last poll",
+    "eurom-tx-connected": "Connected",
+    "eurom-tx-error": "Error",
+    "eurom-none": "—",
+    "eurom-tx-none": "No telemetry yet.",
+    "eurom-on": "On",
+    "eurom-off": "Off"
   },
   de: {
     "net-action-on": "Schaltaktion",
@@ -5762,7 +6157,44 @@ const FALLBACK_TRANSLATIONS = {
     "helty-status-offline": "Offline",
     "helty-status-stale": "Veraltete Daten",
     "helty-status-hub-disabled": "Hub deaktiviert",
-    "helty-btn-refresh": "Aktualisieren"
+    "helty-btn-refresh": "Aktualisieren",
+    "eurom-status-online": "Online",
+    "eurom-status-offline": "Offline",
+    "eurom-status-stale": "Veraltete Daten",
+    "eurom-status-hub-disabled": "Hub deaktiviert",
+    "eurom-btn-refresh": "Aktualisieren",
+    "eurom-key-set": "Ein Local Key ist gespeichert. Leer lassen, um ihn zu behalten.",
+    "eurom-key-missing": "Kein Local Key gespeichert. 16-Zeichen-Key aus tinytuya einfügen.",
+    "eurom-saved": "Konfiguration gespeichert.",
+    "eurom-host-required": "Host oder IP-Adresse eingeben.",
+    "eurom-testing": "Verbindung wird getestet...",
+    "eurom-test-ok": "TCP-Port offen",
+    "eurom-test-fail": "Verbindung fehlgeschlagen",
+    "eurom-selected": "Ausgewählt",
+    "eurom-scan-queued": "Scan in Warteschlange...",
+    "eurom-busy": "EUROM-Client beschäftigt",
+    "eurom-scanning": "Suche...",
+    "eurom-found": "Gerät(e)",
+    "eurom-scan-done": "Scan abgeschlossen.",
+    "eurom-scan-empty": "Scan abgeschlossen — keine Tuya/EUROM-Broadcasts und keine TCP-6668-Hosts gefunden.",
+    "eurom-scan-fail": "Scan fehlgeschlagen",
+    "eurom-scan-start": "Tuya/EUROM-Scan starten...",
+    "eurom-scan-timeout": "Scan-Zeitüberschreitung",
+    "eurom-tx-on": "Leistung",
+    "eurom-tx-setpoint": "Sollwert",
+    "eurom-tx-temp": "Temperatur",
+    "eurom-tx-unit": "Einheit",
+    "eurom-tx-timer": "Timer",
+    "eurom-tx-timer-on": "Timer an",
+    "eurom-tx-schedule": "Zeitplan",
+    "eurom-tx-last-update": "Letzte Aktualisierung",
+    "eurom-tx-last-poll": "Letzter Poll",
+    "eurom-tx-connected": "Verbunden",
+    "eurom-tx-error": "Fehler",
+    "eurom-none": "—",
+    "eurom-tx-none": "Noch keine Telemetrie.",
+    "eurom-on": "Ein",
+    "eurom-off": "Aus"
   },
   se: {
     "net-action-on": "Växlingsåtgärd",
@@ -5787,7 +6219,44 @@ const FALLBACK_TRANSLATIONS = {
     "helty-status-offline": "Offline",
     "helty-status-stale": "Föråldrad data",
     "helty-status-hub-disabled": "Hubb inaktiverad",
-    "helty-btn-refresh": "Uppdatera"
+    "helty-btn-refresh": "Uppdatera",
+    "eurom-status-online": "Online",
+    "eurom-status-offline": "Offline",
+    "eurom-status-stale": "Föråldrad data",
+    "eurom-status-hub-disabled": "Hubb inaktiverad",
+    "eurom-btn-refresh": "Uppdatera",
+    "eurom-key-set": "En local key är sparad. Lämna tomt för att behålla den.",
+    "eurom-key-missing": "Ingen local key sparad. Klistra in 16-teckensnyckeln från tinytuya.",
+    "eurom-saved": "Konfiguration sparad.",
+    "eurom-host-required": "Ange en värd eller IP-adress.",
+    "eurom-testing": "Testar anslutning...",
+    "eurom-test-ok": "TCP-port öppen",
+    "eurom-test-fail": "Anslutningen misslyckades",
+    "eurom-selected": "Vald",
+    "eurom-scan-queued": "Skanning i kö...",
+    "eurom-busy": "EUROM-klienten är upptagen",
+    "eurom-scanning": "Skannar...",
+    "eurom-found": "enhet(er)",
+    "eurom-scan-done": "Skanning klar.",
+    "eurom-scan-empty": "Skanning klar — inga Tuya/EUROM-broadcasts och inga TCP 6668-värdar hittades.",
+    "eurom-scan-fail": "Skanning misslyckades",
+    "eurom-scan-start": "Startar Tuya/EUROM-skanning...",
+    "eurom-scan-timeout": "Skanningen tog för lång tid",
+    "eurom-tx-on": "Ström",
+    "eurom-tx-setpoint": "Börvärde",
+    "eurom-tx-temp": "Temperatur",
+    "eurom-tx-unit": "Enhet",
+    "eurom-tx-timer": "Timer",
+    "eurom-tx-timer-on": "Timer på",
+    "eurom-tx-schedule": "Schema",
+    "eurom-tx-last-update": "Senaste uppdatering",
+    "eurom-tx-last-poll": "Senaste poll",
+    "eurom-tx-connected": "Ansluten",
+    "eurom-tx-error": "Fel",
+    "eurom-none": "—",
+    "eurom-tx-none": "Ingen telemetri ännu.",
+    "eurom-on": "På",
+    "eurom-off": "Av"
   }
 };
 const URL_I18N = typeof DEBUG !== 'undefined' && DEBUG
@@ -5821,9 +6290,21 @@ function changeLanguage(lang) {
 }
 
 function loadTranslations(lang) {
-	console.log(URL_I18N + `/${lang}.json`);
-  fetch( URL_I18N + `/${lang}.json` )
-    .then(response => response.json())
+  const localUrl = (typeof window.cdnAsset === "function")
+    ? window.cdnAsset("lang/" + lang + ".json")
+    : "";
+  const remoteUrl = URL_I18N + `/${lang}.json`;
+  const firstUrl = localUrl || remoteUrl;
+  console.log(firstUrl);
+  fetch(firstUrl)
+    .then(response => {
+      if (response.ok) return response.json();
+      if (localUrl && firstUrl === localUrl) return fetch(remoteUrl).then(r => {
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.json();
+      });
+      throw new Error("HTTP " + response.status);
+    })
     .then(json => {
       translations = json;
       applyTranslations();
