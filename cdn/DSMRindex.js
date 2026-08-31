@@ -4924,7 +4924,6 @@ function splitSettingsUI() {
     "mqtt_helty",
     "mqtt_eurom",
     "mqtt_wiz",
-    "mqtt_monitor",
     "mqtt_tls",
     "mqtt_broker",
     "mqtt_broker_port",
@@ -5009,8 +5008,7 @@ function splitSettingsUI() {
   const mqttMonitorCard = document.getElementById("mqtt_monitor_card");
   if (mqttMonitorCard) mqtt.appendChild(mqttMonitorCard);
   const mqttMonitorRow = document.getElementById("settingR_mqtt_monitor");
-  const mqttCardToggle = mqttMonitorCard && mqttMonitorCard.querySelector(".settings-card-toggle");
-  if (mqttCardToggle && mqttMonitorRow) mqttCardToggle.style.display = "none";
+  if (mqttMonitorRow) mqttMonitorRow.remove();
   const modbusMonitorCard = document.getElementById("modbus_monitor_card");
   if (modbusMonitorCard) modbus.appendChild(modbusMonitorCard);
   const tapToggleRow = document.getElementById("settingR_tap-enabled");
@@ -5257,10 +5255,9 @@ function refreshMqttMonitorData() {
 function refreshMqttMonitorView() {
   const card = document.getElementById("mqtt_monitor_card");
   const toggle = document.getElementById("mqtt_monitor_toggle");
-  const settingToggle = document.getElementById("setFld_mqtt_monitor");
   const mqttEnabled = document.getElementById("setFld_mqtt_enabled");
   const enabled = getMqttMonitorEnabled();
-  if (!card) return;
+  if (!card || !toggle) return;
 
   if (enabled === null || (mqttEnabled && !mqttEnabled.checked)) {
     card.style.display = "none";
@@ -5268,31 +5265,24 @@ function refreshMqttMonitorView() {
   }
 
   card.style.display = "";
-  if (toggle) toggle.checked = enabled;
-  if (settingToggle) settingToggle.checked = enabled;
+  toggle.checked = enabled;
   renderMqttMonitorData({ enabled, data: [] });
   if (enabled) refreshMqttMonitorData();
 }
 
 function initMqttMonitorControls() {
   const toggle = document.getElementById("mqtt_monitor_toggle");
-  const settingToggle = document.getElementById("setFld_mqtt_monitor");
   const refreshBtn = document.getElementById("mqtt_monitor_refresh");
   const clearBtn = document.getElementById("mqtt_monitor_clear");
 
-  const bindMonitorToggle = (el) => {
-    if (!el || el.dataset.bound) return;
-    el.dataset.bound = "1";
-    el.addEventListener("change", () => {
-      sendPostSetting("mqtt_monitor", el.checked);
-      if (objDAL?.dev_settings) objDAL.dev_settings.mqtt_monitor = el.checked;
-      if (toggle && toggle !== el) toggle.checked = el.checked;
-      if (settingToggle && settingToggle !== el) settingToggle.checked = el.checked;
+  if (toggle && !toggle.dataset.bound) {
+    toggle.dataset.bound = "1";
+    toggle.addEventListener("change", () => {
+      sendPostSetting("mqtt_monitor", toggle.checked);
+      if (objDAL?.dev_settings) objDAL.dev_settings.mqtt_monitor = toggle.checked;
       refreshMqttMonitorView();
     });
-  };
-  bindMonitorToggle(toggle);
-  bindMonitorToggle(settingToggle);
+  }
 
   if (refreshBtn && !refreshBtn.dataset.bound) {
     refreshBtn.dataset.bound = "1";
@@ -5322,7 +5312,7 @@ function initMqttMonitorControls() {
 	for( let i in data )
 	{
 	  if ( i == "conf") continue;
-	  if ( i == "mb_monitor") continue;
+	  if ( i == "mb_monitor" || i == "mqtt_monitor") continue;
 	  console.log("["+i+"]=>["+data[i].value+"]");
 	  let settings = document.getElementById('settings_table');
 	  if( ( document.getElementById("settingR_"+i)) == null )
