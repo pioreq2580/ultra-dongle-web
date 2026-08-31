@@ -4902,6 +4902,7 @@ function initSettingsSubTabsOnce() {
       const pane = document.getElementById(targetId);
       if (pane) pane.classList.add("active");
       if (targetId === "settings_modbus") refreshModbusMonitorView();
+      if (targetId === "settings_mqtt") refreshMqttMonitorView();
     });
   });
 }
@@ -4920,6 +4921,10 @@ function splitSettingsUI() {
   // velden op basis van "i" (dus zonder "settingR_")
   const MQTT_KEYS = new Set([
     "mqtt_enabled",
+    "mqtt_helty",
+    "mqtt_eurom",
+    "mqtt_wiz",
+    "mqtt_monitor",
     "mqtt_tls",
     "mqtt_broker",
     "mqtt_broker_port",
@@ -5001,6 +5006,11 @@ function splitSettingsUI() {
 
   const mqttToggleRow = document.getElementById("settingR_mqtt_enabled");
   if (mqttToggleRow) mqtt.prepend(mqttToggleRow);
+  const mqttMonitorCard = document.getElementById("mqtt_monitor_card");
+  if (mqttMonitorCard) mqtt.appendChild(mqttMonitorCard);
+  const mqttMonitorRow = document.getElementById("settingR_mqtt_monitor");
+  const mqttCardToggle = mqttMonitorCard && mqttMonitorCard.querySelector(".settings-card-toggle");
+  if (mqttCardToggle && mqttMonitorRow) mqttCardToggle.style.display = "none";
   const modbusMonitorCard = document.getElementById("modbus_monitor_card");
   if (modbusMonitorCard) modbus.appendChild(modbusMonitorCard);
   const tapToggleRow = document.getElementById("settingR_tap-enabled");
@@ -5019,6 +5029,10 @@ function updateMQTTSettingsVisibility() {
     if (row.id === "settingR_mqtt_enabled") return;
     row.style.display = showMQTTFields ? "" : "none";
   });
+
+  const monitorCard = document.getElementById("mqtt_monitor_card");
+  if (monitorCard && !showMQTTFields) monitorCard.style.display = "none";
+  else if (showMQTTFields) refreshMqttMonitorView();
 }
 
 function updateTapSettingsVisibility() {
@@ -5169,6 +5183,135 @@ function initModbusMonitorControls() {
     });
   }
 }
+
+function getMqttMonitorSetting() {
+  return objDAL?.dev_settings?.mqtt_monitor;
+}
+
+function getMqttMonitorEnabled() {
+  const setting = getMqttMonitorSetting();
+  if (typeof setting === "boolean") return setting;
+  if (setting && typeof setting === "object" && "value" in setting) return !!setting.value;
+  return null;
+}
+
+function renderMqttMonitorData(json) {
+  const body = document.getElementById("mqtt_monitor_body");
+  const empty = document.getElementById("mqtt_monitor_empty");
+  const wrap = document.getElementById("mqtt_monitor_table_wrap");
+  const tbody = document.querySelector("#mqtt_monitor_table tbody");
+  if (!body || !empty || !wrap || !tbody) return;
+
+  if (!json?.enabled) {
+    body.style.display = "none";
+    wrap.style.display = "none";
+    empty.style.display = "";
+    tbody.innerHTML = "";
+    return;
+  }
+
+  body.style.display = "";
+  tbody.innerHTML = "";
+
+  const rows = Array.isArray(json.data) ? json.data : [];
+  if (rows.length === 0) {
+    wrap.style.display = "none";
+    empty.style.display = "";
+    return;
+  }
+
+  empty.style.display = "none";
+  wrap.style.display = "";
+
+  rows.forEach(row => {
+    const tr = document.createElement("tr");
+    const rawTime = row.time ?? row.timestamp;
+    [
+      rawTime ? formatTimestamp(rawTime) : "-",
+      row.system ?? "-",
+      row.dir ?? "-",
+      row.topic ?? "-",
+      row.result ?? "-"
+    ].forEach(value => {
+      const cell = document.createElement("td");
+      cell.textContent = value;
+      tr.appendChild(cell);
+    });
+    tbody.appendChild(tr);
+  });
+}
+
+function refreshMqttMonitorData() {
+  const enabled = getMqttMonitorEnabled();
+  if (!enabled) {
+    renderMqttMonitorData({ enabled: false, data: [] });
+    return;
+  }
+
+  fetch("/api/v2/mqtt/monitor")
+    .then(response => response.json())
+    .then(json => renderMqttMonitorData(json))
+    .catch(error => console.error("refreshMqttMonitorData()", error));
+}
+
+function refreshMqttMonitorView() {
+  const card = document.getElementById("mqtt_monitor_card");
+  const toggle = document.getElementById("mqtt_monitor_toggle");
+  const settingToggle = document.getElementById("setFld_mqtt_monitor");
+  const mqttEnabled = document.getElementById("setFld_mqtt_enabled");
+  const enabled = getMqttMonitorEnabled();
+  if (!card) return;
+
+  if (enabled === null || (mqttEnabled && !mqttEnabled.checked)) {
+    card.style.display = "none";
+    return;
+  }
+
+  card.style.display = "";
+  if (toggle) toggle.checked = enabled;
+  if (settingToggle) settingToggle.checked = enabled;
+  renderMqttMonitorData({ enabled, data: [] });
+  if (enabled) refreshMqttMonitorData();
+}
+
+function initMqttMonitorControls() {
+  const toggle = document.getElementById("mqtt_monitor_toggle");
+  const settingToggle = document.getElementById("setFld_mqtt_monitor");
+  const refreshBtn = document.getElementById("mqtt_monitor_refresh");
+  const clearBtn = document.getElementById("mqtt_monitor_clear");
+
+  const bindMonitorToggle = (el) => {
+    if (!el || el.dataset.bound) return;
+    el.dataset.bound = "1";
+    el.addEventListener("change", () => {
+      sendPostSetting("mqtt_monitor", el.checked);
+      if (objDAL?.dev_settings) objDAL.dev_settings.mqtt_monitor = el.checked;
+      if (toggle && toggle !== el) toggle.checked = el.checked;
+      if (settingToggle && settingToggle !== el) settingToggle.checked = el.checked;
+      refreshMqttMonitorView();
+    });
+  };
+  bindMonitorToggle(toggle);
+  bindMonitorToggle(settingToggle);
+
+  if (refreshBtn && !refreshBtn.dataset.bound) {
+    refreshBtn.dataset.bound = "1";
+    refreshBtn.addEventListener("click", event => {
+      event.preventDefault();
+      refreshMqttMonitorData();
+    });
+  }
+
+  if (clearBtn && !clearBtn.dataset.bound) {
+    clearBtn.dataset.bound = "1";
+    clearBtn.addEventListener("click", event => {
+      event.preventDefault();
+      fetch("/api/v2/mqtt/monitor", { method: "POST" })
+        .then(() => refreshMqttMonitorData())
+        .catch(error => console.error("clear mqtt monitor", error));
+    });
+  }
+}
   
   //============================================================================  
   function refreshSettings()
@@ -5192,7 +5335,10 @@ function initModbusMonitorControls() {
 		  let fldDiv = document.createElement("div");
 			  if ( (i == "gd_tariff") && (Dongle_Config == "p1-q") ) fldDiv.textContent = "Warmte tarief (GJ)";
 			  else if ( i == "gas_netw_costs") fldDiv.textContent = "Netwerkkosten Gas/maand";
-			  else fldDiv.textContent = td(i);
+			  else {
+			    fldDiv.setAttribute("data-i18n-key", "dict_" + i);
+			    fldDiv.textContent = td(i);
+			  }
 			  rowDiv.appendChild(fldDiv);
 		//--- input ---
 		  let inputDiv = document.createElement("div");
@@ -5419,6 +5565,8 @@ function initModbusMonitorControls() {
   updateBrowserSettingsControls();
   initModbusMonitorControls();
   refreshModbusMonitorView();
+  initMqttMonitorControls();
+  refreshMqttMonitorView();
 
       
   } // refreshSettings()
@@ -6143,6 +6291,10 @@ function handle_menu_click()
 let translations = {};
 const FALLBACK_TRANSLATIONS = {
   nl: {
+    "dict_mqtt_helty": "MQTT Air Guard",
+    "dict_mqtt_eurom": "MQTT EUROM",
+    "dict_mqtt_wiz": "MQTT WiZ",
+    "dict_mqtt_monitor": "MQTT monitor",
     "net-action-on": "Schakelactie",
     "net-action-off": "Terugschakelactie",
     "net-direction": "Reageer op",
@@ -6214,6 +6366,10 @@ const FALLBACK_TRANSLATIONS = {
     "eurom-off": "Uit"
   },
   en: {
+    "dict_mqtt_helty": "MQTT Air Guard",
+    "dict_mqtt_eurom": "MQTT EUROM",
+    "dict_mqtt_wiz": "MQTT WiZ",
+    "dict_mqtt_monitor": "MQTT monitor",
     "net-action-on": "Switch action",
     "net-action-off": "Switch-back action",
     "net-direction": "Respond to",
@@ -6285,6 +6441,10 @@ const FALLBACK_TRANSLATIONS = {
     "eurom-off": "Off"
   },
   de: {
+    "dict_mqtt_helty": "MQTT Air Guard",
+    "dict_mqtt_eurom": "MQTT EUROM",
+    "dict_mqtt_wiz": "MQTT WiZ",
+    "dict_mqtt_monitor": "MQTT-Monitor",
     "net-action-on": "Schaltaktion",
     "net-action-off": "Zurückschaltaktion",
     "net-direction": "Reagieren auf",
@@ -6356,6 +6516,10 @@ const FALLBACK_TRANSLATIONS = {
     "eurom-off": "Aus"
   },
   se: {
+    "dict_mqtt_helty": "MQTT Air Guard",
+    "dict_mqtt_eurom": "MQTT EUROM",
+    "dict_mqtt_wiz": "MQTT WiZ",
+    "dict_mqtt_monitor": "MQTT-monitor",
     "net-action-on": "Växlingsåtgärd",
     "net-action-off": "Återgångsåtgärd",
     "net-direction": "Reagera på",

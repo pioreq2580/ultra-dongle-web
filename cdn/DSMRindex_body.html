@@ -644,7 +644,41 @@
 		<div id="settings_general" class="settings-pane active"></div>
 		<div id="settings_smart_meter" class="settings-pane"></div>
 		<div id="settings_tariff" class="settings-pane"></div>
-		<div id="settings_mqtt" class="settings-pane"></div>
+		<div id="settings_mqtt" class="settings-pane">
+		  <div id="mqtt_monitor_card" class="settings-card" style="display:none">
+			<div class="settings-card-header">
+			  <h3 data-i18n-key="mqtt-monitor-title">MQTT monitor</h3>
+			  <p data-i18n-key="mqtt-monitor-desc">Logt de laatste 30 MQTT publish- en subscribe-events voor Air Guard, EUROM en WiZ.</p>
+			</div>
+			<div class="settings-card-toggle">
+			  <label class="checkbox-row" for="mqtt_monitor_toggle">
+				<input type="checkbox" id="mqtt_monitor_toggle">
+				<span data-i18n-key="mqtt-monitor-enable">MQTT monitor inschakelen</span>
+			  </label>
+			</div>
+			<div id="mqtt_monitor_body" style="display:none">
+			  <div class="settings-card-actions">
+				<a id="mqtt_monitor_refresh" class="btn" href="#" data-i18n-key="btn-refresh">Verversen</a>
+				<a id="mqtt_monitor_clear" class="btn" href="#" data-i18n-key="btn-clear">Wissen</a>
+			  </div>
+			  <p id="mqtt_monitor_empty" class="settings-help" data-i18n-key="mqtt-monitor-empty">Nog geen MQTT events gelogd</p>
+			  <div id="mqtt_monitor_table_wrap" style="display:none">
+				<table id="mqtt_monitor_table">
+				  <thead>
+					<tr>
+					  <th data-i18n-key="mqtt-monitor-col-time">Tijd</th>
+					  <th data-i18n-key="mqtt-monitor-col-system">Systeem</th>
+					  <th data-i18n-key="mqtt-monitor-col-dir">Richting</th>
+					  <th data-i18n-key="mqtt-monitor-col-topic">Topic</th>
+					  <th data-i18n-key="mqtt-monitor-col-result">Resultaat</th>
+					</tr>
+				  </thead>
+				  <tbody></tbody>
+				</table>
+			  </div>
+			</div>
+		  </div>
+		</div>
 		<div id="settings_modbus" class="settings-pane">
 		  <div id="modbus_monitor_card" class="settings-card" style="display:none">
 			<div class="settings-card-header">
