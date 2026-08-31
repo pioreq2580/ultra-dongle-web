@@ -1386,11 +1386,12 @@ let wizConfiguredRooms = [];
 let wizPollSec = 30;
 let wizRgbDebounce = {};
 let wizCctDebounce = {};
+let wizScanSelectedMacs = new Set();
 
 const WIZ_SCAN_POLL_MS = 1000;
 const WIZ_PAGE_POLL_MS = 5000;
 const WIZ_CMD_REFRESH_MS = 400;
-const WIZ_RGB_DEBOUNCE_MS = 350;
+const WIZ_RGB_DEBOUNCE_MS = 180;
 const WIZ_CCT_DEBOUNCE_MS = 350;
 const WIZ_CCT_MIN = 2700;
 const WIZ_CCT_MAX = 6500;
@@ -1426,8 +1427,65 @@ function wizHexToRgb(hex) {
   return { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) };
 }
 
+function wizRgbChannel(value, fallback) {
+  if (value === undefined || value === null || value === "") return fallback;
+  const n = parseInt(value, 10);
+  if (Number.isNaN(n)) return fallback;
+  return Math.max(0, Math.min(255, n));
+}
+
+function wizRgbToHsv(r, g, b) {
+  r = wizRgbChannel(r, 0) / 255;
+  g = wizRgbChannel(g, 0) / 255;
+  b = wizRgbChannel(b, 0) / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const d = max - min;
+  let h = 0;
+  if (d > 0) {
+    if (max === r) h = ((g - b) / d) % 6;
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h *= 60;
+    if (h < 0) h += 360;
+  }
+  return { h: h, s: max === 0 ? 0 : d / max, v: max };
+}
+
+function wizHsvToRgb(h, s, v) {
+  h = ((h % 360) + 360) % 360;
+  s = Math.max(0, Math.min(1, s));
+  v = Math.max(0, Math.min(1, v));
+  const c = v * s;
+  const x = c * (1 - Math.abs((h / 60) % 2 - 1));
+  const m = v - c;
+  let r = 0, g = 0, b = 0;
+  if (h < 60) { r = c; g = x; }
+  else if (h < 120) { r = x; g = c; }
+  else if (h < 180) { g = c; b = x; }
+  else if (h < 240) { g = x; b = c; }
+  else if (h < 300) { r = x; b = c; }
+  else { r = c; b = x; }
+  return {
+    r: Math.round((r + m) * 255),
+    g: Math.round((g + m) * 255),
+    b: Math.round((b + m) * 255)
+  };
+}
+
+function wizIsGenericName(light) {
+  const name = String((light && light.name) || "").trim();
+  if (!name) return true;
+  if (light.mac && name === light.mac) return true;
+  if (light.mac && name === "WiZ " + light.mac) return true;
+  if (light.module_name && name === light.module_name) return true;
+  if (/^ESP\d+_/.test(name)) return true;
+  return false;
+}
+
 function wizDisplayName(light) {
-  return light.name || light.module_name || light.mac;
+  if (!wizIsGenericName(light)) return light.name;
+  return (light && light.mac) || (light && light.name) || "";
 }
 
 function wizMetaLine(light) {
@@ -1448,15 +1506,10 @@ function wizIsMockLight(light) {
 
 function wizLightIsRgb(light) {
   if (!light) return false;
-  if (typeof light.cct === "boolean" && light.cct && light.rgb === false) return false;
-  if (typeof light.rgb === "boolean") {
-    if (!light.rgb) return false;
-    // Legacy firmware: ESP24_SHRGB reports rgb from module name but getPilot only has temp.
-    const name = String(light.module_name || light.name || "");
-    if (/ESP24_SHRGB/i.test(name)) return false;
-    if (light.temp && light.r === undefined && light.g === undefined && light.b === undefined) return false;
-    return true;
-  }
+  if (light.rgb === true) return true;
+  const moduleName = String(light.module_name || light.name || "");
+  if (/RGB/i.test(moduleName)) return true;
+  if (light.rgb === false) return false;
   return false;
 }
 
@@ -1495,11 +1548,15 @@ function wizGroupLightsByRoom(lights) {
 
 function wizLightIsCct(light) {
   if (!light) return false;
-  if (typeof light.cct === "boolean") return light.cct;
-  if (light.temp) return true;
-  const name = String(light.module_name || light.name || "");
-  if (/ESP24_SHRGB/i.test(name)) return true;
+  if (light.cct === true || light.temp) return true;
+  const moduleName = String(light.module_name || light.name || "");
+  if (/SHRGB|_TW|TW_|RGB/i.test(moduleName)) return true;
+  if (light.cct === false) return false;
   return false;
+}
+
+function wizApplyI18n(root) {
+  if (typeof applyTranslations === "function") applyTranslations(root);
 }
 
 function wizSetInputValue(el, value) {
@@ -1597,9 +1654,9 @@ function wizScanProgressText(json) {
 }
 
 function wizStatusBadge(light) {
-  if (!light.online) return typeof t === "function" ? t("wiz-status-offline") : "offline";
-  if (!light.on) return typeof t === "function" ? t("wiz-status-off") : "off";
-  return typeof t === "function" ? t("wiz-status-online") : "online";
+  if (!light.online) return typeof t === "function" ? t("wiz-status-offline") : "Offline";
+  if (!light.on) return typeof t === "function" ? t("wiz-status-off") : "Off";
+  return typeof t === "function" ? t("wiz-status-online") : "Online";
 }
 
 function wizCardClass(light) {
@@ -1608,9 +1665,24 @@ function wizCardClass(light) {
   return " wiz-online";
 }
 
+function wizBindScanTable() {
+  const body = document.getElementById("wiz_scan_body");
+  if (!body || body.dataset.bound) return;
+  body.dataset.bound = "1";
+  body.addEventListener("change", event => {
+    const el = event.target;
+    if (!el.classList.contains("wiz-scan-check") || !el.dataset.mac) return;
+    if (el.checked) wizScanSelectedMacs.add(el.dataset.mac);
+    else wizScanSelectedMacs.delete(el.dataset.mac);
+  });
+}
+
 function wizScan() {
+  wizScanSelectedMacs = new Set();
   wizSetStatus(typeof t === "function" ? t("wiz-scan-starting") : "Starting network scan...", false);
   document.getElementById("wiz_scan_progress").textContent = "";
+  const scanBody = document.getElementById("wiz_scan_body");
+  if (scanBody) scanBody.innerHTML = "";
   document.getElementById("wiz_scan_table").style.display = "none";
   wizApi("/api/v2/wiz/discover", "POST", {})
     .then(() => {
@@ -1672,23 +1744,59 @@ function wizRenderScanResults(results) {
   const table = document.getElementById("wiz_scan_table");
   const body = document.getElementById("wiz_scan_body");
   if (!table || !body) return;
-  body.innerHTML = "";
+  wizBindScanTable();
   if (!results.length) { table.style.display = "none"; return; }
   table.style.display = "table";
+
+  document.querySelectorAll(".wiz-scan-check:checked").forEach(ch => {
+    if (ch.dataset.mac) wizScanSelectedMacs.add(ch.dataset.mac);
+  });
+
   const known = new Set((wizConfiguredLights || []).map(l => l.mac));
+  const existing = new Map();
+  body.querySelectorAll("tr[data-mac]").forEach(tr => existing.set(tr.dataset.mac, tr));
+
   results.forEach(item => {
-    const tr = document.createElement("tr");
+    if (!item.mac) return;
     const already = known.has(item.mac);
-    const label = item.name || item.module_name || item.mac;
+    const label = wizDisplayName(item);
     const roomId = item.room_id || 0;
     const roomLabel = wizScanRoomLabel(item);
-    tr.innerHTML =
-      "<td><input type='checkbox' class='wiz-scan-check' data-mac='" + wizEscapeHtml(item.mac) + "' data-ip='" + wizEscapeHtml(item.ip) + "' data-name='" + wizEscapeHtml(label) + "' data-room-id='" + roomId + "' data-room='" + wizEscapeHtml(item.room || "") + "'" + (already ? " disabled" : "") + "></td>" +
-      "<td><strong>" + wizEscapeHtml(label) + "</strong></td>" +
-      "<td>" + wizEscapeHtml(roomLabel) + "</td>" +
-      "<td>" + wizEscapeHtml(item.ip) + "</td>" +
-      "<td class='wiz-mac-cell'>" + wizEscapeHtml(item.mac) + "</td>";
-    body.appendChild(tr);
+    let tr = existing.get(item.mac);
+    if (!tr) {
+      tr = document.createElement("tr");
+      tr.dataset.mac = item.mac;
+      tr.innerHTML =
+        "<td><input type='checkbox' class='wiz-scan-check' data-mac='" + wizEscapeHtml(item.mac) + "'></td>" +
+        "<td><strong></strong></td>" +
+        "<td class='wiz-scan-room'></td>" +
+        "<td class='wiz-scan-ip'></td>" +
+        "<td class='wiz-mac-cell'></td>";
+      body.appendChild(tr);
+    }
+    const check = tr.querySelector(".wiz-scan-check");
+    if (check) {
+      check.dataset.mac = item.mac;
+      check.dataset.ip = item.ip || "";
+      check.dataset.name = label;
+      check.dataset.roomId = String(roomId);
+      check.dataset.room = item.room || "";
+      check.disabled = already;
+      if (already) {
+        check.checked = false;
+        wizScanSelectedMacs.delete(item.mac);
+      } else if (wizScanSelectedMacs.has(item.mac)) {
+        check.checked = true;
+      }
+    }
+    const nameEl = tr.querySelector("strong");
+    if (nameEl) nameEl.textContent = label;
+    const roomEl = tr.querySelector(".wiz-scan-room");
+    if (roomEl) roomEl.textContent = roomLabel;
+    const ipEl = tr.querySelector(".wiz-scan-ip");
+    if (ipEl) ipEl.textContent = item.ip || "";
+    const macEl = tr.querySelector(".wiz-mac-cell");
+    if (macEl) macEl.textContent = item.mac;
   });
 }
 
@@ -1707,7 +1815,7 @@ function wizAddSelected() {
     wizConfiguredLights.push({
       mac: mac,
       ip: ch.dataset.ip || "",
-      name: ch.dataset.name || mac,
+      name: (ch.dataset.name && ch.dataset.name !== ch.dataset.mac) ? ch.dataset.name : mac,
       room_id: roomId,
       room: roomName,
       enabled: true
@@ -1741,17 +1849,22 @@ function wizRefreshLights(force) {
 
 function wizBuildRgbHtml(light) {
   if (!wizLightIsRgb(light)) return "";
-  const swatch = wizRgbToHex(light.r || 0, light.g || 0, light.b || 0);
+  const r = wizRgbChannel(light.r, 255);
+  const g = wizRgbChannel(light.g, 255);
+  const b = wizRgbChannel(light.b, 255);
+  const hsv = wizRgbToHsv(r, g, b);
+  const hex = wizRgbToHex(r, g, b);
   return (
-    "<div class='wiz-rgb-controls' data-mac='" + wizEscapeHtml(light.mac) + "'>" +
+    "<div class='wiz-rgb-controls' data-mac='" + wizEscapeHtml(light.mac) +
+      "' data-r='" + r + "' data-g='" + g + "' data-b='" + b + "' data-h='" + hsv.h.toFixed(1) + "'>" +
       "<div class='wiz-color-picker'>" +
-        "<label class='wiz-color-wrap' title='Pick color'>" +
-          "<input type='color' class='wiz-color' value='" + swatch + "' data-mac='" + wizEscapeHtml(light.mac) + "' aria-label='Color'>" +
-        "</label>" +
-        "<div class='wiz-rgb-inputs'>" +
-          "<label>R<input type='number' min='0' max='255' value='" + (light.r || 0) + "' class='wiz-r' data-mac='" + wizEscapeHtml(light.mac) + "'></label>" +
-          "<label>G<input type='number' min='0' max='255' value='" + (light.g || 0) + "' class='wiz-g' data-mac='" + wizEscapeHtml(light.mac) + "'></label>" +
-          "<label>B<input type='number' min='0' max='255' value='" + (light.b || 0) + "' class='wiz-b' data-mac='" + wizEscapeHtml(light.mac) + "'></label>" +
+        "<div class='wiz-color-head'>" +
+          "<span class='wiz-ctrl-label' data-i18n-key='wiz-color'>Color</span>" +
+          "<span class='wiz-color-swatch' style='background:" + hex + "' aria-hidden='true'></span>" +
+        "</div>" +
+        "<div class='wiz-sv-pad' role='slider' aria-label='Color'>" +
+          "<div class='wiz-sv-cursor' style='left:" + ((hsv.h / 360) * 100).toFixed(1) +
+            "%;top:" + (hsv.s * 100).toFixed(1) + "%'></div>" +
         "</div>" +
       "</div>" +
     "</div>"
@@ -1759,7 +1872,7 @@ function wizBuildRgbHtml(light) {
 }
 
 function wizBuildCctHtml(light) {
-  if (!wizLightIsCct(light) || wizLightIsRgb(light)) return "";
+  if (!wizLightIsCct(light)) return "";
   const temp = Math.max(WIZ_CCT_MIN, Math.min(WIZ_CCT_MAX, parseInt(light.temp, 10) || 4200));
   return (
     "<div class='wiz-cct-controls' data-mac='" + wizEscapeHtml(light.mac) + "'>" +
@@ -1780,7 +1893,7 @@ function wizBuildCardHtml(light) {
     "<div class='wiz-card-body'>" +
       "<div class='wiz-card-head'>" +
         "<div class='wiz-title-block'>" +
-          "<input type='text' class='wiz-name-input' value='" + wizEscapeHtml(displayName) + "' data-mac='" + wizEscapeHtml(light.mac) + "' placeholder='Light name'>" +
+          "<input type='text' class='wiz-name-input' value='" + wizEscapeHtml(displayName) + "' data-mac='" + wizEscapeHtml(light.mac) + "' data-i18n-placeholder='wiz-name-placeholder' placeholder='Light name'>" +
         "</div>" +
         "<button type='button' class='wiz-remove' data-mac='" + wizEscapeHtml(light.mac) + "' title='Remove'>&times;</button>" +
       "</div>" +
@@ -1831,23 +1944,30 @@ function wizUpdateLightCard(card, light) {
   const dimLabel = card.querySelector(".wiz-dim-label");
   if (dimLabel && document.activeElement !== dim) dimLabel.textContent = dimPct + "%";
 
+  const body = card.querySelector(".wiz-card-body") || card;
   let rgbBlock = card.querySelector(".wiz-rgb-controls");
   if (wizLightIsRgb(light)) {
-    if (!rgbBlock) {
-      card.insertAdjacentHTML("beforeend", wizBuildRgbHtml(light));
+    const html = wizBuildRgbHtml(light);
+    if (!rgbBlock || !rgbBlock.querySelector(".wiz-sv-pad") || rgbBlock.querySelector(".wiz-hue")) {
+      if (rgbBlock) rgbBlock.outerHTML = html;
+      else {
+        const cct = card.querySelector(".wiz-cct-controls");
+        if (cct) cct.insertAdjacentHTML("beforebegin", html);
+        else body.insertAdjacentHTML("beforeend", html);
+      }
       rgbBlock = card.querySelector(".wiz-rgb-controls");
     } else {
-      wizSyncRgbInputs(rgbBlock, light.r || 0, light.g || 0, light.b || 0);
+      wizSyncRgbInputs(rgbBlock, wizRgbChannel(light.r, 255), wizRgbChannel(light.g, 255), wizRgbChannel(light.b, 255));
     }
   } else if (rgbBlock) {
     rgbBlock.remove();
   }
 
   let cctBlock = card.querySelector(".wiz-cct-controls");
-  if (wizLightIsCct(light) && !wizLightIsRgb(light)) {
+  if (wizLightIsCct(light)) {
     const temp = Math.max(WIZ_CCT_MIN, Math.min(WIZ_CCT_MAX, parseInt(light.temp, 10) || 4200));
     if (!cctBlock) {
-      card.insertAdjacentHTML("beforeend", wizBuildCctHtml(light));
+      body.insertAdjacentHTML("beforeend", wizBuildCctHtml(light));
       cctBlock = card.querySelector(".wiz-cct-controls");
     } else {
       wizSetInputValue(cctBlock.querySelector(".wiz-temp"), String(temp));
@@ -1878,32 +1998,32 @@ function wizEnsureRoomSection(grid, roomId) {
     section.dataset.roomKey = key;
     section.dataset.roomId = String(roomId || 0);
     if (roomId) {
-      const placeholder = typeof t === "function" ? t("wiz-room-name-placeholder") : "Name this room";
-      const allOn = typeof t === "function" ? t("wiz-btn-all-on") : "All on";
-      const allOff = typeof t === "function" ? t("wiz-btn-all-off") : "All off";
       section.innerHTML =
         "<div class='wiz-room-head'>" +
-          "<input type='text' class='wiz-room-name-input' data-room-id='" + roomId + "' placeholder='" + wizEscapeHtml(placeholder) + "'>" +
+          "<span class='wiz-room-title'></span>" +
           "<div class='wiz-room-actions'>" +
-            "<button type='button' class='wiz-room-on' data-room-id='" + roomId + "'>" + wizEscapeHtml(allOn) + "</button>" +
-            "<button type='button' class='wiz-room-off' data-room-id='" + roomId + "'>" + wizEscapeHtml(allOff) + "</button>" +
+            "<button type='button' class='wiz-room-on' data-room-id='" + roomId + "' data-i18n-key='wiz-btn-all-on'>All on</button>" +
+            "<button type='button' class='wiz-room-off' data-room-id='" + roomId + "' data-i18n-key='wiz-btn-all-off'>All off</button>" +
           "</div>" +
         "</div>" +
         "<div class='wiz-room-grid'></div>";
     } else {
-      const unassigned = typeof t === "function" ? t("wiz-room-unassigned") : "Unassigned";
       section.innerHTML =
         "<div class='wiz-room-head wiz-room-head-static'>" +
-          "<span class='wiz-room-title'>" + wizEscapeHtml(unassigned) + "</span>" +
+          "<span class='wiz-room-title' data-i18n-key='wiz-room-unassigned'>Unassigned</span>" +
         "</div>" +
         "<div class='wiz-room-grid'></div>";
     }
     grid.appendChild(section);
   }
-  const nameInput = section.querySelector(".wiz-room-name-input");
-  if (nameInput && document.activeElement !== nameInput) {
+  const leftover = section.querySelector(".wiz-room-name-input");
+  if (leftover) leftover.remove();
+  const titleEl = section.querySelector(".wiz-room-title");
+  if (titleEl && roomId) {
     const room = wizConfiguredRooms.find(r => r.id === roomId);
-    wizSetInputValue(nameInput, (room && room.name) || "");
+    const name = room && room.name ? String(room.name).trim() : "";
+    titleEl.textContent = name;
+    titleEl.style.display = name ? "" : "none";
   }
   return section.querySelector(".wiz-room-grid");
 }
@@ -1916,10 +2036,6 @@ function wizInitLightGrid() {
   grid.addEventListener("change", event => {
     const el = event.target;
     const mac = el.dataset.mac;
-    if (el.classList.contains("wiz-room-name-input")) {
-      wizSaveRoomName(el.dataset.roomId, el.value);
-      return;
-    }
     if (!mac) return;
 
     if (el.classList.contains("wiz-toggle")) {
@@ -1945,29 +2061,49 @@ function wizInitLightGrid() {
       wizSendTempDebounced(mac, temp, card);
       return;
     }
-    if (el.classList.contains("wiz-r") || el.classList.contains("wiz-g") || el.classList.contains("wiz-b")) {
-      const block = el.closest(".wiz-rgb-controls");
-      if (!block) return;
-      const rgb = wizReadRgbBlock(block);
-      wizSyncRgbInputs(block, rgb.r, rgb.g, rgb.b);
-      wizSendRgb(mac, rgb.r, rgb.g, rgb.b, el.closest(".wiz-card"));
-      return;
-    }
     if (el.classList.contains("wiz-name-input")) {
       const item = wizConfiguredLights.find(l => l.mac === mac);
-      if (item) item.name = el.value.trim() || item.mac;
+      if (item) item.name = el.value.trim() || mac;
       wizSaveConfig();
     }
   });
 
   grid.addEventListener("input", event => {
     const el = event.target;
-    if (!el.classList.contains("wiz-color")) return;
-    const rgb = wizHexToRgb(el.value);
-    const block = el.closest(".wiz-rgb-controls");
-    wizSyncRgbInputs(block, rgb.r, rgb.g, rgb.b);
-    wizSendRgbDebounced(el.dataset.mac, rgb.r, rgb.g, rgb.b, el.closest(".wiz-card"));
+    if (el.classList.contains("wiz-temp")) {
+      const temp = parseInt(el.value, 10) || WIZ_CCT_MIN;
+      const tempLabel = el.parentElement && el.parentElement.querySelector(".wiz-temp-label");
+      if (tempLabel) tempLabel.textContent = temp + " K";
+    }
   });
+
+  grid.addEventListener("pointerdown", event => {
+    const pad = event.target.closest(".wiz-sv-pad");
+    if (!pad || !grid.contains(pad)) return;
+    event.preventDefault();
+    pad.setPointerCapture(event.pointerId);
+    pad.dataset.dragging = "1";
+    const block = pad.closest(".wiz-rgb-controls");
+    if (block) block.dataset.dragging = "1";
+    wizApplySvPointer(block, event, false);
+  });
+
+  grid.addEventListener("pointermove", event => {
+    const pad = event.target.closest(".wiz-sv-pad");
+    if (!pad || pad.dataset.dragging !== "1") return;
+    wizApplySvPointer(pad.closest(".wiz-rgb-controls"), event, false);
+  });
+
+  const endSvDrag = event => {
+    const pad = event.target.closest(".wiz-sv-pad");
+    if (!pad || pad.dataset.dragging !== "1") return;
+    pad.dataset.dragging = "";
+    const block = pad.closest(".wiz-rgb-controls");
+    if (block) block.dataset.dragging = "";
+    wizApplySvPointer(block, event, true);
+  };
+  grid.addEventListener("pointerup", endSvDrag);
+  grid.addEventListener("pointercancel", endSvDrag);
 
   grid.addEventListener("click", event => {
     const roomOn = event.target.closest(".wiz-room-on");
@@ -2038,24 +2174,75 @@ function wizRenderLightGrid(lights) {
 
   const empty = grid.querySelector(".wiz-empty");
   if (empty) empty.remove();
+  wizApplyI18n(grid);
+}
+
+function wizRgbIsBusy(block) {
+  if (!block) return false;
+  if (block.dataset.dragging === "1") return true;
+  const mac = block.dataset.mac;
+  return !!(mac && wizRgbDebounce[mac]);
+}
+
+function wizPaintRgbPicker(block, r, g, b, keepHue) {
+  if (!block) return;
+  r = wizRgbChannel(r, 255);
+  g = wizRgbChannel(g, 255);
+  b = wizRgbChannel(b, 255);
+  block.dataset.r = String(r);
+  block.dataset.g = String(g);
+  block.dataset.b = String(b);
+  const hsv = wizRgbToHsv(r, g, b);
+  let h = hsv.h;
+  if (keepHue || hsv.s < 0.02) {
+    const stored = parseFloat(block.dataset.h);
+    if (!Number.isNaN(stored)) h = stored;
+  }
+  block.dataset.h = String(h);
+  const cursor = block.querySelector(".wiz-sv-cursor");
+  if (cursor) {
+    cursor.style.left = ((h / 360) * 100).toFixed(1) + "%";
+    cursor.style.top = (hsv.s * 100).toFixed(1) + "%";
+  }
+  const swatch = block.querySelector(".wiz-color-swatch");
+  if (swatch) swatch.style.background = wizRgbToHex(r, g, b);
 }
 
 function wizSyncRgbInputs(block, r, g, b) {
-  if (!block) return;
-  wizSetInputValue(block.querySelector(".wiz-color"), wizRgbToHex(r, g, b));
-  wizSetInputValue(block.querySelector(".wiz-r"), String(r));
-  wizSetInputValue(block.querySelector(".wiz-g"), String(g));
-  wizSetInputValue(block.querySelector(".wiz-b"), String(b));
+  if (!block || wizRgbIsBusy(block)) return;
+  wizPaintRgbPicker(block, r, g, b, false);
 }
 
 function wizReadRgbBlock(block) {
   if (!block) return { r: 255, g: 255, b: 255 };
-  const clamp = n => Math.max(0, Math.min(255, parseInt(n, 10) || 0));
   return {
-    r: clamp(block.querySelector(".wiz-r")?.value),
-    g: clamp(block.querySelector(".wiz-g")?.value),
-    b: clamp(block.querySelector(".wiz-b")?.value)
+    r: wizRgbChannel(block.dataset.r, 255),
+    g: wizRgbChannel(block.dataset.g, 255),
+    b: wizRgbChannel(block.dataset.b, 255)
   };
+}
+
+function wizRgbFromPad(block, clientX, clientY) {
+  const pad = block && block.querySelector(".wiz-sv-pad");
+  if (!pad) return wizReadRgbBlock(block);
+  const rect = pad.getBoundingClientRect();
+  const h = rect.width ? Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)) * 360 : 0;
+  const s = rect.height ? Math.max(0, Math.min(1, (clientY - rect.top) / rect.height)) : 1;
+  block.dataset.h = String(h);
+  return wizHsvToRgb(h, s, 1);
+}
+
+function wizPushRgb(block, rgb, commit) {
+  if (!block || !rgb) return;
+  wizPaintRgbPicker(block, rgb.r, rgb.g, rgb.b, true);
+  const card = block.closest(".wiz-card");
+  if (commit) wizSendRgb(block.dataset.mac, rgb.r, rgb.g, rgb.b, card);
+  else wizSendRgbDebounced(block.dataset.mac, rgb.r, rgb.g, rgb.b, card);
+}
+
+function wizApplySvPointer(block, event, commit) {
+  if (!block || !event) return;
+  wizPushRgb(block, wizRgbFromPad(block, event.clientX, event.clientY), commit);
 }
 
 function wizOptimisticCard(card, payload) {
@@ -2123,7 +2310,10 @@ function wizSendTempDebounced(mac, temp, card) {
 function wizSendCommand(payload, card) {
   wizOptimisticCard(card, payload);
   return wizApi("/api/v2/wiz/command", "POST", payload)
-    .then(() => setTimeout(() => wizRefreshLights(true), WIZ_CMD_REFRESH_MS))
+    .then(json => {
+      if (json && json.error) throw new Error(json.error);
+      setTimeout(() => wizRefreshLights(true), WIZ_CMD_REFRESH_MS);
+    })
     .catch(err => {
       wizSetStatus("Command failed: " + err, true);
       setTimeout(() => wizRefreshLights(true), WIZ_CMD_REFRESH_MS);
@@ -2143,6 +2333,7 @@ function wizStartPagePolling() {
 function wizStartPage() {
   wizStopPolling();
   wizInitLightGrid();
+  wizBindScanTable();
   wizLoadConfig()
     .then(() => wizRefreshLights())
     .catch(err => wizSetStatus("Config load failed: " + err, true));
@@ -6353,7 +6544,21 @@ const FALLBACK_TRANSLATIONS = {
     "eurom-none": "—",
     "eurom-tx-none": "Nog geen telemetrie.",
     "eurom-on": "Aan",
-    "eurom-off": "Uit"
+    "eurom-off": "Uit",
+    "wiz-on": "Aan",
+    "wiz-color": "Kleur",
+    "wiz-cct": "Kleurtemperatuur",
+    "wiz-name-placeholder": "Lampnaam",
+    "wiz-room-name-placeholder": "Geef deze kamer een naam",
+    "wiz-btn-all-on": "Alles aan",
+    "wiz-btn-all-off": "Alles uit",
+    "wiz-room-unassigned": "Niet toegewezen",
+    "wiz-room-unnamed": "Naamloze kamer",
+    "wiz-status-online": "Online",
+    "wiz-status-off": "Uit",
+    "wiz-status-offline": "Offline",
+    "wiz-no-lights": "Nog geen lampen. Scan en voeg lampen toe.",
+    "wiz-name-hint": "Lampen krijgen de MAC als naam; de lamp zelf heeft geen unieke bijnaam. Hernoem een kaart naar wens. Kamers volgen de WiZ-app (roomId)."
   },
   en: {
     "dict_mqtt_helty": "MQTT Air Guard",
@@ -6428,7 +6633,21 @@ const FALLBACK_TRANSLATIONS = {
     "eurom-none": "—",
     "eurom-tx-none": "No telemetry yet.",
     "eurom-on": "On",
-    "eurom-off": "Off"
+    "eurom-off": "Off",
+    "wiz-on": "On",
+    "wiz-color": "Color",
+    "wiz-cct": "Color temperature",
+    "wiz-name-placeholder": "Light name",
+    "wiz-room-name-placeholder": "Name this room",
+    "wiz-btn-all-on": "All on",
+    "wiz-btn-all-off": "All off",
+    "wiz-room-unassigned": "Unassigned",
+    "wiz-room-unnamed": "Unnamed room",
+    "wiz-status-online": "Online",
+    "wiz-status-off": "Off",
+    "wiz-status-offline": "Offline",
+    "wiz-no-lights": "No lights configured yet. Scan and add bulbs above.",
+    "wiz-name-hint": "Lights are named by MAC because bulbs do not expose a unique nickname on the LAN. Rename any card. Rooms follow your WiZ app grouping (roomId)."
   },
   de: {
     "dict_mqtt_helty": "MQTT Air Guard",
@@ -6503,7 +6722,21 @@ const FALLBACK_TRANSLATIONS = {
     "eurom-none": "—",
     "eurom-tx-none": "Noch keine Telemetrie.",
     "eurom-on": "Ein",
-    "eurom-off": "Aus"
+    "eurom-off": "Aus",
+    "wiz-on": "Ein",
+    "wiz-color": "Farbe",
+    "wiz-cct": "Farbtemperatur",
+    "wiz-name-placeholder": "Lichtname",
+    "wiz-room-name-placeholder": "Raum benennen",
+    "wiz-btn-all-on": "Alle ein",
+    "wiz-btn-all-off": "Alle aus",
+    "wiz-room-unassigned": "Nicht zugeordnet",
+    "wiz-room-unnamed": "Unbenannter Raum",
+    "wiz-status-online": "Online",
+    "wiz-status-off": "Aus",
+    "wiz-status-offline": "Offline",
+    "wiz-no-lights": "Noch keine Lichter. Netz scannen und Lampen hinzufügen.",
+    "wiz-name-hint": "Lampen werden nach MAC benannt, weil die Birne keinen eindeutigen Namen per LAN liefert. Karten können umbenannt werden. Räume folgen der WiZ-App (roomId)."
   },
   se: {
     "dict_mqtt_helty": "MQTT Air Guard",
@@ -6578,7 +6811,21 @@ const FALLBACK_TRANSLATIONS = {
     "eurom-none": "—",
     "eurom-tx-none": "Ingen telemetri ännu.",
     "eurom-on": "På",
-    "eurom-off": "Av"
+    "eurom-off": "Av",
+    "wiz-on": "På",
+    "wiz-color": "Färg",
+    "wiz-cct": "Färgtemperatur",
+    "wiz-name-placeholder": "Lampnamn",
+    "wiz-room-name-placeholder": "Namnge rummet",
+    "wiz-btn-all-on": "Alla på",
+    "wiz-btn-all-off": "Alla av",
+    "wiz-room-unassigned": "Ej tilldelad",
+    "wiz-room-unnamed": "Namnlöst rum",
+    "wiz-status-online": "Online",
+    "wiz-status-off": "Av",
+    "wiz-status-offline": "Offline",
+    "wiz-no-lights": "Inga lampor ännu. Skanna och lägg till lampor.",
+    "wiz-name-hint": "Lampor namnges med MAC eftersom lampan inte har ett unikt smeknamn på LAN. Byt namn på kortet. Rum följer WiZ-appen (roomId)."
   }
 };
 const URL_I18N = typeof DEBUG !== 'undefined' && DEBUG
@@ -6594,14 +6841,22 @@ function td(key) {
   return t("dict_" + key);
 }
 
-function applyTranslations() {
-  document.querySelectorAll('[data-i18n-key]').forEach(el => {
+function applyTranslations(root) {
+  const scope = root && root.querySelectorAll ? root : document;
+  scope.querySelectorAll('[data-i18n-key]').forEach(el => {
     const key = el.getAttribute('data-i18n-key');
     const translation = t(key);
     if (translation !== key) el.innerHTML = translation;
   });
-  updateBrowserSettingsControls();
-  NetSwitchUpdateBar();
+  scope.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+    const key = el.getAttribute('data-i18n-placeholder');
+    const translation = t(key);
+    if (translation !== key) el.setAttribute('placeholder', translation);
+  });
+  if (scope === document) {
+    updateBrowserSettingsControls();
+    NetSwitchUpdateBar();
+  }
 }
 
 function changeLanguage(lang) {
