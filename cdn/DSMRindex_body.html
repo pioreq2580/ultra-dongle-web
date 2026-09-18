@@ -1,4 +1,4 @@
-<!--
+﻿<!--
 ***************************************************************************  
 **  Program  : DSMRindex_body.html, part of DSMRloggerAPI
 **  Version  : v4.8.9
@@ -18,6 +18,7 @@
    		<select id="languageSelector" onchange="changeLanguage(this.value)">
 		  <option value="nl">NL</option>
 		  <option value="en">EN</option>
+		  <option value="fr">FR</option>
 		  <option value="se">SE</option>
 		  <option value="de">DE</option>		  
 	</select>
@@ -489,27 +490,42 @@
   <!-- START SysInfo Tab -->
   <section id="SysInfoTab" class="tabName subTab">
     <h2 data-i18n-key="tle-sysinfo"> Systeeminformatie</h2>
-    <div id='devInfo'>
-      <table id="devInfoTable">
-      <thead>
-        <tr>
-            <th data-i18n-key="lbl-name">Naam</th>
-            <th data-i18n-key="lbl-value">Waarde</th>
-            <th data-i18n-key="lbl-unit">Eenheid</th>
-        </tr>
-      </thead>
-      <tbody id="tb_info">
-      </tbody>
-      <tfoot>
-<!-- 
-        <tr>
-            <td colspan=3>Data uit de Dongle</td>
-        </tr>
- -->
-      </tfoot>
-      </table>
+    <div id="devInfo" class="sysinfo-shell">
+      <div id="sysinfo_overview" class="sysinfo-overview"></div>
+
+      <article id="sysinfo_update" class="sysinfo-card sysinfo-update-card">
+        <h3 data-i18n-key="sysinfo-firmware-update">Firmware-update</h3>
+        <div id="sysinfo_update_rows" class="sysinfo-rows"></div>
+      </article>
+
+      <div class="sysinfo-grid">
+        <article class="sysinfo-card">
+          <h3 data-i18n-key="setting-smart-meter">Slimme meter</h3>
+          <div id="sysinfo_smart_meter" class="sysinfo-rows"></div>
+        </article>
+        <article class="sysinfo-card">
+          <h3 data-i18n-key="sysinfo-network">Netwerk</h3>
+          <div id="sysinfo_network" class="sysinfo-rows"></div>
+        </article>
+        <article class="sysinfo-card">
+          <h3 data-i18n-key="sysinfo-hardware">Hardware</h3>
+          <div id="sysinfo_hardware" class="sysinfo-rows"></div>
+        </article>
+        <article class="sysinfo-card">
+          <h3 data-i18n-key="sysinfo-system-status">Systeemstatus</h3>
+          <div id="sysinfo_status" class="sysinfo-rows"></div>
+        </article>
+        <article id="sysinfo_connections_card" class="sysinfo-card">
+          <h3 data-i18n-key="sysinfo-connections">Koppelingen</h3>
+          <div id="sysinfo_connections" class="sysinfo-rows"></div>
+        </article>
+      </div>
+
+      <details id="sysinfo_technical" class="sysinfo-card sysinfo-technical">
+        <summary data-i18n-key="sysinfo-technical-details">Technische details</summary>
+        <div id="sysinfo_technical_rows" class="sysinfo-rows"></div>
+      </details>
     </div>
-  
   </section>  <!-- END SysInfo Tab -->
 
   <!-- START raw data tab -->
@@ -554,280 +570,73 @@
     <h2 data-i18n-key="tle-api-docs">API documentatie</h2>
     <table id=ApiDocTable>
   <tr>
-    <th>url</th>
-    <th>omchrijving</th>
+    <th data-i18n-key="api-col-url">URL</th>
+    <th data-i18n-key="api-col-description">Description</th>
   </tr>
   <tr>
     <td><a href="api/v2/dev/info" target="_blank">api/v2/dev/info</a></td>
-    <td>Device info in JSON format</td>
+    <td data-i18n-key="api-dev-info">Device info in JSON format</td>
   </tr>
   <tr>
     <td><a href="api/v2/dev/time" target="_blank">api/v2/dev/time</a></td>
-    <td>Device time (epoch) in JSON format</td>
+    <td data-i18n-key="api-dev-time">Device time (epoch) in JSON format</td>
   </tr>
   <tr>
     <td><a href="api/v2/dev/settings" target="_blank">api/v2/dev/settings</a></td>
-    <td>Device settings in JSON format</td>
+    <td data-i18n-key="api-dev-settings">Device settings in JSON format</td>
   </tr>
   <tr>
     <td><a href="api/v2/dev/settings" target="_blank">api/v2/dev/settings{jsonObj}</a></td>
-    <td>[POST] update Device settings in JSON format. </br>Test with:
+    <td data-i18n-key="api-dev-settings-post">[POST] update Device settings in JSON format. </br>Test with:
         curl -X POST -H \"Content-Type: application/json\" --data '{\"name\":\"mqtt_broker\",\"value\":\"hassio.local\"}'</td>
   </tr>
   <tr>
     <td><a href="api/v2/sm/info" target="_blank">api/v2/sm/info</a></td>
-    <td>Smart Meter info in JSON format</td>
+    <td data-i18n-key="api-sm-info">Smart Meter info in JSON format</td>
   </tr>
   <tr>
     <td><a href="api/v2/sm/actual" target="_blank">api/v2/sm/actual</a></td>
-    <td>Smart Meter Actual data in JSON format</td>
+    <td data-i18n-key="api-sm-actual">Smart Meter Actual data in JSON format</td>
   </tr>
   <tr>
     <td><a href="api/v2/sm/fields" target="_blank">api/v2/sm/fields</a></td>
-    <td>Smart Meter all fields data in JSON format<br>JSON format: {\"name\":[{\"value\":&lt;value&gt;,\"unit\":\"&lt;unit&gt;\"}]}</td>
+    <td data-i18n-key="api-sm-fields">Smart Meter all fields data in JSON format<br>JSON format: {\"name\":[{\"value\":&lt;value&gt;,\"unit\":\"&lt;unit&gt;\"}]}</td>
   </tr>
     <tr>
     <td><a href="api/v2/sm/fields/{fieldName}" target="_blank">api/v2/sm/fields/{fieldName}</a></td>
-    <td>Smart Meter one field data in JSON format</td>
+    <td data-i18n-key="api-sm-field">Smart Meter one field data in JSON format</td>
   </tr>
     <tr>
     <td><a href="api/v2/sm/telegram" target="_blank">api/v2/sm/telegram</a></td>
-    <td>raw smart meter data as sent by the Smart Meter including all \"\\r\\n\" line endings</td>
+    <td data-i18n-key="api-sm-telegram">raw smart meter data as sent by the Smart Meter including all \"\\r\\n\" line endings</td>
   </tr>
   <tr>
     <td><a href="api/v2/stats" target="_blank">api/v2/stats</a></td>
-    <td>daily statistics (eg. peak values)</td>
+    <td data-i18n-key="api-stats">daily statistics (eg. peak values)</td>
   </tr>
     <tr>
     <td><a href="api/v2/hist/hours" target="_blank">api/v2/hist/hours</a></td>
-    <td>History data per hour in JSON format</td>
+    <td data-i18n-key="api-hist-hours">History data per hour in JSON format</td>
   </tr>
     <tr>
     <td><a href="api/v2/hist/days" target="_blank">api/v2/hist/days</a></td>
-    <td>History data per day in JSON format</td>
+    <td data-i18n-key="api-hist-days">History data per day in JSON format</td>
   </tr>
   <tr>
     <td><a href="api/v2/hist/months" target="_blank">api/v2/hist/months</a></td>
-    <td>History data per month in JSON format</td>
+    <td data-i18n-key="api-hist-months">History data per month in JSON format</td>
   </tr>  
   <tr>
     <td><a href="/api/v1/data" target="_blank">/api/v1/data</a></td>
-    <td>HW v1 data api format</td>
+    <td data-i18n-key="api-v1-data">HW v1 data api format</td>
   </tr>
   <tr>
-    <td>History data file structure (month, day, hour)</td>
+    <td data-i18n-key="api-history-structure">History data file structure (month, day, hour)</td>
 	<td>{"actSlot":&lt;actual slot#&gt;,"data":[{"date":&lt;YYMMDDHH&gt;,"values":[&lt;EDT1&gt;,&lt;EDT2&gt;,&lt;ERT1&gt;,&lt;ERT2&gt;,&lt;GDT&gt;]}, ...]}</td>
   </tr>  
 </table>
   </section>  <!-- END API docs Tab -->
     
-  <section id="Settings" class="tabName">
-      <!-- START Tabbladen -->
-  <h2 data-i18n-key="tle-settings">Instellingen</h2>
-  
-  <div id="tabEditSettings" class="outer-div" style="display:block;">
-	  <div class="inner-div">
-	
-		<div id="settings_subtabs" class="settings-subtabs">
-		  <button type="button" class="subtab-btn active" data-target="settings_general" data-i18n-key="setting-general">Algemeen</button>
-		  <button type="button" class="subtab-btn" data-target="settings_smart_meter" data-i18n-key="setting-smart-meter">Slimme meter</button>
-		  <button type="button" class="subtab-btn" data-target="settings_tariff" data-i18n-key="setting-tariff">Tarieven</button>
-		  <button type="button" class="subtab-btn" data-target="settings_mqtt" data-i18n-key="setting-mqtt">MQTT</button>
-		  <button type="button" class="subtab-btn" data-target="settings_modbus" data-i18n-key="setting-modbus">Modbus</button>
-		  <button type="button" class="subtab-btn" data-target="settings_tapelectric" data-i18n-key="setting-tapelectric">Tap Electric</button>
-		</div>
-	
-		<!-- staging: hier bouwt refreshSettings() de rows -->
-		<div id="settings_table" class="inner-div" style="display:none"></div>
-	
-		<!-- panes -->
-		<div id="settings_general" class="settings-pane active"></div>
-		<div id="settings_smart_meter" class="settings-pane"></div>
-		<div id="settings_tariff" class="settings-pane"></div>
-		<div id="settings_mqtt" class="settings-pane">
-		  <div id="mqtt_monitor_card" class="settings-card" style="display:none">
-			<div class="settings-card-header">
-			  <h3 data-i18n-key="mqtt-monitor-title">MQTT monitor</h3>
-			  <p data-i18n-key="mqtt-monitor-desc">Logt de laatste 30 MQTT publish- en subscribe-events voor Air Guard, EUROM en WiZ.</p>
-			</div>
-			<div class="settings-card-toggle">
-			  <label class="checkbox-row" for="mqtt_monitor_toggle">
-				<input type="checkbox" id="mqtt_monitor_toggle">
-				<span data-i18n-key="mqtt-monitor-enable">MQTT monitor inschakelen</span>
-			  </label>
-			</div>
-			<div id="mqtt_monitor_body" style="display:none">
-			  <div class="settings-card-actions">
-				<a id="mqtt_monitor_refresh" class="btn" href="#" data-i18n-key="btn-refresh">Verversen</a>
-				<a id="mqtt_monitor_clear" class="btn" href="#" data-i18n-key="btn-clear">Wissen</a>
-			  </div>
-			  <p id="mqtt_monitor_empty" class="settings-help" data-i18n-key="mqtt-monitor-empty">Nog geen MQTT events gelogd</p>
-			  <div id="mqtt_monitor_table_wrap" style="display:none">
-				<table id="mqtt_monitor_table">
-				  <thead>
-					<tr>
-					  <th data-i18n-key="mqtt-monitor-col-time">Tijd</th>
-					  <th data-i18n-key="mqtt-monitor-col-system">Systeem</th>
-					  <th data-i18n-key="mqtt-monitor-col-dir">Richting</th>
-					  <th data-i18n-key="mqtt-monitor-col-topic">Topic</th>
-					  <th data-i18n-key="mqtt-monitor-col-result">Resultaat</th>
-					</tr>
-				  </thead>
-				  <tbody></tbody>
-				</table>
-			  </div>
-			</div>
-		  </div>
-		</div>
-		<div id="settings_modbus" class="settings-pane">
-		  <div id="modbus_monitor_card" class="settings-card" style="display:none">
-			<div class="settings-card-header">
-			  <h3 data-i18n-key="modbus-monitor-title">Modbus monitor</h3>
-			  <p data-i18n-key="modbus-monitor-desc">Logt de laatste 30 Modbus requests zodat zichtbaar is wat de client opvraagt. Werkt voor TCP en RTU.</p>
-			</div>
-			<div class="settings-card-toggle">
-			  <label class="checkbox-row" for="modbus_monitor_toggle">
-				<input type="checkbox" id="modbus_monitor_toggle">
-				<span data-i18n-key="modbus-monitor-enable">Modbus monitor inschakelen</span>
-			  </label>
-			</div>
-			<div id="modbus_monitor_body" style="display:none">
-			  <div class="settings-card-actions">
-				<a id="modbus_monitor_refresh" class="btn" href="#" data-i18n-key="btn-refresh">Verversen</a>
-				<a id="modbus_monitor_clear" class="btn" href="#" data-i18n-key="btn-clear">Wissen</a>
-			  </div>
-			  <p id="modbus_monitor_empty" class="settings-help" data-i18n-key="modbus-monitor-empty">Nog geen Modbus requests ontvangen</p>
-			  <div id="modbus_monitor_table_wrap" style="display:none">
-				<table id="modbus_monitor_table">
-				  <thead>
-					<tr>
-					  <th data-i18n-key="modbus-monitor-col-time">Tijd</th>
-					  <th data-i18n-key="modbus-monitor-col-mode">Mode</th>
-					  <th data-i18n-key="modbus-monitor-col-id">ID</th>
-					  <th data-i18n-key="modbus-monitor-col-fc">FC</th>
-					  <th data-i18n-key="modbus-monitor-col-address">Adres</th>
-					  <th data-i18n-key="modbus-monitor-col-words">Words</th>
-					  <th data-i18n-key="modbus-monitor-col-result">Resultaat</th>
-					</tr>
-				  </thead>
-				  <tbody></tbody>
-				</table>
-			  </div>
-			</div>
-		  </div>
-		</div>
-		<div id="settings_tapelectric" class="settings-pane"></div>
-	
-	  </div>
-   </div>
-  
-  <div id="settings_btns">
-      <a id='bUndo'   class='btn' onclick="undoReload()" data-i18n-key="btn-undo">Undo</a>
-      <a id='bSave'   class='btn' onclick="saveData()" data-i18n-key="btn-save">Opslaan</a>
-      </div>
-  </section> <!-- end Settings Page -->
- 
-  <section id="EditMonths" class="tabName"> 
-   <h2 data-i18n-key="tle-input-mtr-reading">Meterstanden invoeren</h2>
-  <div id="tabEditMonths" class="tabName">
-    <label for="Period"><b data-i18n-key="tbl-mtr-readering">Meterstand: </b></label>
-      Energy Delivered
-      <input type="radio" name="editType" id="MED" onchange="setEditType('ED')" checked/>
-      Energy Returned
-      <input type="radio" name="editType" id="MER" onchange="setEditType('ER')"/>
-      Gas Delivered
-      <input type="radio" name="editType" id="MGD" onchange="setEditType('GD')"/>  
-	  <div id="tabMaanden" class="outer-div">
-		<!-- START edit tabMonths -->
-		  <div id="editMonths" class="inner-div"></div> 
-	  </div>  <!-- END tabMonthss -->
-  </div> <!-- tabMonths -->
-  <div id="settings_btns">
-      <a id='bUndo'   class='btn' onclick="undoReload()" data-i18n-key="btn-undo">Undo</a>
-      <a id='bSave'   class='btn' onclick="saveData()" data-i18n-key="btn-save">Opslaan</a>
-      </div>
-  </section> <!-- end tabEditMonths Page -->
-  
-  <!-- START FileExplorer Tab -->
-  <section id="FSExplorer" class="tabName"><h2 data-i18n-key="tle-file-mng">Bestandsbeheer</h2>
-      <div>
-         <main id="FSmain"></main>
-      </div>
-		<form action="/upload" method="POST" enctype="multipart/form-data">
-		  <input id="Ifile" type="file" name="upload">
-          <input id="Iupload" type="submit" value="Upload" disabled />
-      </form>
-      <span></span>
-      <fileSize></fileSize>
-  </section>
-  
- <section id="Logout" class="tabName">
-      <!-- START Tabbladen -->
-      <div id=logout>
-	  	<h2 class=align-c data-i18n-key="tle-logout">Logout</h2>
-      	<hr>
-        <h2>Je bent uitgelogd</h2>
-        <p>Je sessie is verlopen of je hebt zelf uitgelogd.</p>
-        <button onclick="location.href='/'">Inloggen opnieuw</button>
-
-      </div> 
-  </section> <!-- logout -->
-  
-  
-<section id="Reset" class="tabName">
-      <!-- START Tabbladen -->
-      <div id=eid-setup>
-	  	<h2 class=align-c data-i18n-key="tle-reset-update">Reset en Update</h2>
-      	<hr>
-        <div id="btnReboot" class="act_btn">
-      		<p data-i18n-key="txt-reboot">Na het indrukken van de REBOOT knop zal de Dongel opnieuw opstarten.</p>
-        	<span></span>
-			<form  action='/ReBoot'>
-				<input type='submit' class='button' name='SUBMIT' value='Reboot'>
-			</form>
-      	</div> 
-      	<br>
-     	<hr>
-      	<div id="btnResetWifi" class="act_btn">
-			<p data-i18n-key="txt-reset-wifi">Na het indrukken van de RESET WIFI knop zal de module herstarten en vragen om het wifi-netwerk opnieuw in te stellen. Zie initiële setup van de module.</p>
-			<span></span>
-			<form action='/ResetWifi' >
-			  <input id="resetWifi" type='submit' class='button' name='SUBMIT' value='Reset Wifi'/>
-			</form>
-      	</div> 
-
-      </div> 
-  </section> <!-- end Settings Page -->
-  
-  <section id="ESPHome" class="tabName">
-      <!-- START Tabbladen -->
-		<div id=eid-setup>
-	  		<h2 class=align-c data-i18n-key="tle-esphome">ESPHome</h2>
-	      	<div id="esphomeMigrationCard" class="act_btn">
-			<p id="esphomeTargetLabel"></p>
-			<p data-i18n-key="txt-esphome-migrate"></p>
-			<p id="esphomeManifestHelp" style="display:none"></p>
-			<div class=align-c><button id="esphomeMigrateButton" type="button" onclick='return showSystemActionDialog("esphome")' data-i18n-key="btn-migrate">MIGREER</button></div>
-			<p id="esphomeUnsupportedText" data-i18n-key="txt-esphome-unsupported" style="display:none"></p>
-	    </div> 
-  </section> <!-- end Settings Page -->
-  
-<section id="About" class="tabName">
-      <!-- START Tabbladen -->
-  <h2>About</h2>
-      <hr>
-      <p>P1 Dongle ten behoeven van het uitlezen van de slimme meter</p>
-	  <p>Huidige software versie dongle:</p><div id="current_verion"></div>
-      <p>Laatste software versie :</p><div id="latest_verion"></div>
-  </section> <!-- end Settings Page -->
-  
-	<section id="Redirect" class="tabName">
-	<h2 data-i18n-key="tle-reboot">Opnieuw opstarten</h2>
-	<h3><div id="RedirectMessage"></div></h3>
-	<div><b>Redirect over <span id='counter'>45</span> seconden.</b>
-	<hr>Indien de pagina niet automatisch getoond wordt klik dan op <a href='/'>Home pagina</a></div>
-    </section>  
-
 	<section id="HeltyDiscover" class="tabName">
 		<div id="eid-setup">
 		<h1 class="align-c" data-i18n-key="helty-discover-title">Air Guard Discover</h1>
@@ -915,7 +724,7 @@
 	<section id="EuromDiscover" class="tabName">
 		<div id="eid-setup">
 		<h1 class="align-c" data-i18n-key="eurom-discover-title">EUROM Discover</h1>
-		<p data-i18n-key="eurom-discover-intro">Connect one EUROM Sani IR panel on your LAN (Tuya TCP port 6668). Scan finds host and device id. The local key cannot be invented — paste it from tinytuya / EUROM Smart.</p>
+		<p data-i18n-key="eurom-discover-intro">Connect one EUROM Sani IR panel on your LAN (Tuya TCP port 6668). Scan finds host and device id. The local key cannot be invented â€” paste it from tinytuya / EUROM Smart.</p>
 		<hr>
 		<label for="eurom_name" data-i18n-key="eurom-name">Name</label><br>
 		<input type="text" id="eurom_name" placeholder="Bathroom" style="width:100%"><br><br>
@@ -984,7 +793,7 @@
 				<span class="iconify helty-ctrl-icon" data-icon="mdi-minus"></span>
 			</button>
 			<div class="eurom-setpoint-value">
-				<div id="eurom_setpoint_value">—</div>
+				<div id="eurom_setpoint_value">â€”</div>
 				<div class="eurom-setpoint-label" data-i18n-key="eurom-setpoint-label">Setpoint</div>
 			</div>
 			<button type="button" class="helty-ctrl-btn eurom-setpoint-btn" data-action="setpoint-up" aria-label="+">
@@ -999,7 +808,7 @@
 		<h1 class="align-c" data-i18n-key="wiz-title">WiZ Lights</h1>
 		<p data-i18n-key="wiz-intro">Discover and control Philips WiZ lights on your LAN (UDP port 38899).</p>
 		<p data-i18n-key="wiz-name-hint">Lights are named by MAC because bulbs do not expose a unique nickname on the LAN. Rename any card. Rooms follow your WiZ app grouping (roomId).</p>
-		<p data-i18n-key="wiz-local-hint">Enable <strong>Allow local communication</strong> in the WiZ app (Settings → Security) so bulbs respond on the LAN when off.</p>
+		<p data-i18n-key="wiz-local-hint">Enable <strong>Allow local communication</strong> in the WiZ app (Settings â†’ Security) so bulbs respond on the LAN when off.</p>
 		<hr>
 		<label><input type="checkbox" id="wiz_enabled"> <span data-i18n-key="wiz-enabled">Enable WiZ hub</span></label><br><br>
 		<label for="wiz_poll" data-i18n-key="wiz-poll-interval">Poll interval (seconds)</label><br>
@@ -1044,10 +853,296 @@
 		<hr>
 		<form id="dataForm">
 		<p data-i18n-key="sol-sys">Welk systeem dient gekoppeld te worden?</p>
- 		  <input type="radio" id="pv_enphase" name="solar_system" value="Enphase" onClick="ShowHidePV();" checked="checked">
- 		  <label for="enphase">Enphase</label><br>
-		  <input type="radio" id="pv_solaredge" name="solar_system" value="SolarEdge" onClick="ShowHidePV();">
-		  <label for="solaredge">SolarEdge</label><br>
+ 		Â  <input type="radio" id="pv_enphase" name="solar_system" value="Enphase" onClick="ShowHidePV();" checked="checked">
+ 		Â  <label for="enphase">Enphase</label><br>
+		Â  <input type="radio" id="pv_solaredge" name="solar_system" value="SolarEdge" onClick="ShowHidePV();">
+		Â  <label for="solaredge">SolarEdge</label><br>
+
+  <section id="Settings" class="tabName">
+      <!-- START Tabbladen -->
+  <h2 data-i18n-key="tle-settings">Instellingen</h2>
+  
+  <div id="tabEditSettings" class="outer-div" style="display:block;">
+	  <div class="inner-div">
+	
+		<div id="settings_subtabs" class="settings-subtabs">
+		  <button type="button" class="subtab-btn active" data-target="settings_general" data-i18n-key="setting-general">Algemeen</button>
+		  <button type="button" class="subtab-btn" data-target="settings_smart_meter" data-i18n-key="setting-smart-meter">Slimme meter</button>
+		  <button type="button" class="subtab-btn" data-target="settings_tariff" data-i18n-key="setting-tariff">Tarieven</button>
+		  <button type="button" class="subtab-btn" data-target="settings_mqtt" data-i18n-key="setting-mqtt">MQTT</button>
+		  <button type="button" class="subtab-btn" data-target="settings_modbus" data-i18n-key="setting-modbus">Modbus</button>
+		  <button type="button" class="subtab-btn" data-target="settings_tapelectric" data-i18n-key="setting-tapelectric">Tap Electric</button>
+		  <button type="button" class="subtab-btn" data-target="settings_meent" data-i18n-key="setting-meent" style="display:none">MEENT</button>
+		</div>
+	
+		<!-- staging: hier bouwt refreshSettings() de rows -->
+		<div id="settings_table" class="inner-div" style="display:none"></div>
+	
+		<!-- panes -->
+		<div id="settings_general" class="settings-pane active"></div>
+		<div id="settings_smart_meter" class="settings-pane"></div>
+		<div id="settings_tariff" class="settings-pane"></div>
+		<div id="settings_mqtt" class="settings-pane">
+		  <div id="mqtt_monitor_card" class="settings-card" style="display:none">
+			<div class="settings-card-header">
+			  <h3 data-i18n-key="mqtt-monitor-title">MQTT monitor</h3>
+			  <p data-i18n-key="mqtt-monitor-desc">Logt de laatste 30 MQTT publish- en subscribe-events voor Air Guard, EUROM en WiZ.</p>
+			</div>
+			<div class="settings-card-toggle">
+			  <label class="checkbox-row" for="mqtt_monitor_toggle">
+				<input type="checkbox" id="mqtt_monitor_toggle">
+				<span data-i18n-key="mqtt-monitor-enable">MQTT monitor inschakelen</span>
+			  </label>
+			</div>
+			<div id="mqtt_monitor_body" style="display:none">
+			  <div class="settings-card-actions">
+				<a id="mqtt_monitor_refresh" class="btn" href="#" data-i18n-key="btn-refresh">Verversen</a>
+				<a id="mqtt_monitor_clear" class="btn" href="#" data-i18n-key="btn-clear">Wissen</a>
+			  </div>
+			  <p id="mqtt_monitor_empty" class="settings-help" data-i18n-key="mqtt-monitor-empty">Nog geen MQTT events gelogd</p>
+			  <div id="mqtt_monitor_table_wrap" style="display:none">
+				<table id="mqtt_monitor_table">
+				  <thead>
+					<tr>
+					  <th data-i18n-key="mqtt-monitor-col-time">Tijd</th>
+					  <th data-i18n-key="mqtt-monitor-col-system">Systeem</th>
+					  <th data-i18n-key="mqtt-monitor-col-dir">Richting</th>
+					  <th data-i18n-key="mqtt-monitor-col-topic">Topic</th>
+					  <th data-i18n-key="mqtt-monitor-col-result">Resultaat</th>
+					</tr>
+				  </thead>
+				  <tbody></tbody>
+				</table>
+			  </div>
+			</div>
+		  </div>
+		</div>
+		<div id="settings_modbus" class="settings-pane">
+		  <div id="modbus_monitor_card" class="settings-card" style="display:none">
+			<div class="settings-card-header">
+			  <h3 data-i18n-key="modbus-monitor-title">Modbus monitor</h3>
+			  <p data-i18n-key="modbus-monitor-desc">Logt de laatste 30 Modbus requests zodat zichtbaar is wat de client opvraagt. Werkt voor TCP en RTU.</p>
+			</div>
+			<div class="settings-card-toggle">
+			  <label class="checkbox-row" for="modbus_monitor_toggle">
+				<input type="checkbox" id="modbus_monitor_toggle">
+				<span data-i18n-key="modbus-monitor-enable">Modbus monitor inschakelen</span>
+			  </label>
+			</div>
+			<div id="modbus_monitor_body" style="display:none">
+			  <div class="settings-card-actions">
+				<a id="modbus_monitor_refresh" class="btn" href="#" data-i18n-key="btn-refresh">Verversen</a>
+				<a id="modbus_monitor_clear" class="btn" href="#" data-i18n-key="btn-clear">Wissen</a>
+			  </div>
+			  <p id="modbus_monitor_empty" class="settings-help" data-i18n-key="modbus-monitor-empty">Nog geen Modbus requests ontvangen</p>
+			  <div id="modbus_monitor_table_wrap" style="display:none">
+				<table id="modbus_monitor_table">
+				  <thead>
+					<tr>
+					  <th data-i18n-key="modbus-monitor-col-time">Tijd</th>
+					  <th data-i18n-key="modbus-monitor-col-mode">Mode</th>
+					  <th data-i18n-key="modbus-monitor-col-id">ID</th>
+					  <th data-i18n-key="modbus-monitor-col-fc">FC</th>
+					  <th data-i18n-key="modbus-monitor-col-address">Adres</th>
+					  <th data-i18n-key="modbus-monitor-col-words">Words</th>
+					  <th data-i18n-key="modbus-monitor-col-result">Resultaat</th>
+					</tr>
+				  </thead>
+				  <tbody></tbody>
+				</table>
+			  </div>
+			</div>
+		  </div>
+		</div>
+		<div id="settings_tapelectric" class="settings-pane">
+		  <div id="tap_monitor_card" class="settings-card" style="display:none">
+			<div class="settings-card-header">
+			  <h3 data-i18n-key="tap-monitor-title">Tap Electric monitor</h3>
+			  <p data-i18n-key="tap-monitor-desc">Logt de laatste 30 Tap Electric POST requests zodat zichtbaar is wat er verstuurd wordt en welke HTTP-status terugkomt.</p>
+			</div>
+			<div class="settings-card-toggle">
+			  <label class="checkbox-row" for="tap_monitor_toggle">
+				<input type="checkbox" id="tap_monitor_toggle">
+				<span data-i18n-key="tap-monitor-enable">Tap Electric monitor inschakelen</span>
+			  </label>
+			</div>
+			<div id="tap_monitor_body" style="display:none">
+			  <div class="settings-card-actions">
+				<a id="tap_monitor_refresh" class="btn" href="#" data-i18n-key="btn-refresh">Verversen</a>
+				<a id="tap_monitor_clear" class="btn" href="#" data-i18n-key="btn-clear">Wissen</a>
+			  </div>
+			  <p id="tap_monitor_empty" class="settings-help" data-i18n-key="tap-monitor-empty">Nog geen Tap Electric requests verstuurd</p>
+			  <div id="tap_monitor_table_wrap" style="display:none">
+				<table id="tap_monitor_table">
+				  <thead>
+					<tr>
+					  <th data-i18n-key="tap-monitor-col-time">Tijd</th>
+					  <th data-i18n-key="tap-monitor-col-sent">Verstuurd</th>
+					  <th data-i18n-key="tap-monitor-col-status">Status</th>
+					</tr>
+				  </thead>
+				  <tbody></tbody>
+				</table>
+			  </div>
+			</div>
+		  </div>
+		</div>
+		<div id="settings_meent" class="settings-pane"></div>
+	
+	  </div>
+   </div>
+  
+  <div id="settings_btns">
+      <a id='bUndo'   class='btn' onclick="undoReload()" data-i18n-key="btn-undo">Undo</a>
+      <a id='bSave'   class='btn' onclick="saveData()" data-i18n-key="btn-save">Opslaan</a>
+      </div>
+  </section> <!-- end Settings Page -->
+ 
+  <section id="EditMonths" class="tabName"> 
+   <h2 data-i18n-key="tle-input-mtr-reading">Meterstanden invoeren</h2>
+  <div id="tabEditMonths" class="tabName">
+    <label for="Period"><b data-i18n-key="tbl-mtr-readering">Meterstand: </b></label>
+      <label for="MED" data-i18n-key="edit-type-energy-delivered">Energy Delivered</label>
+      <input type="radio" name="editType" id="MED" onchange="setEditType('ED')" checked/>
+      <label for="MER" data-i18n-key="edit-type-energy-returned">Energy Returned</label>
+      <input type="radio" name="editType" id="MER" onchange="setEditType('ER')"/>
+      <label for="MGD" data-i18n-key="edit-type-gas-delivered">Gas Delivered</label>
+      <input type="radio" name="editType" id="MGD" onchange="setEditType('GD')"/>  
+	  <div id="tabMaanden" class="outer-div">
+		<!-- START edit tabMonths -->
+		  <div id="editMonths" class="inner-div"></div> 
+	  </div>  <!-- END tabMonthss -->
+  </div> <!-- tabMonths -->
+  <div id="settings_btns">
+      <a id='bUndo'   class='btn' onclick="undoReload()" data-i18n-key="btn-undo">Undo</a>
+      <a id='bSave'   class='btn' onclick="saveData()" data-i18n-key="btn-save">Opslaan</a>
+      </div>
+  </section> <!-- end tabEditMonths Page -->
+  
+  <!-- START FileExplorer Tab -->
+  <section id="FSExplorer" class="tabName"><h2 data-i18n-key="tle-file-mng">Bestandsbeheer</h2>
+    <div class="fm-shell">
+      <div class="fm-overview">
+        <div class="fm-summary">
+          <span class="fm-summary-label" data-i18n-key="lbl-fm-files">Aantal bestanden</span>
+          <strong id="fmFileCount" class="fm-summary-value">â€“</strong>
+        </div>
+        <div class="fm-summary fm-storage-summary">
+          <span class="fm-summary-label" data-i18n-key="lbl-fm-storage">Opslag</span>
+          <strong id="fmStorageValue" class="fm-summary-value">â€“</strong>
+          <div class="fm-storage-track" aria-hidden="true"><span id="fmStorageBar"></span></div>
+          <span id="fmStorageMeta" class="fm-summary-meta">â€“</span>
+        </div>
+      </div>
+
+      <div class="fm-card">
+        <div class="fm-card-header">
+          <h3 data-i18n-key="lbl-fm-file-list">Bestanden</h3>
+          <a id="downloadAllFiles" class="fm-secondary-action" href="#">
+            <span class="iconify" data-icon="mdi-download-multiple"></span>
+            <span data-i18n-key="btn-fm-download-all">Alles downloaden</span>
+          </a>
+        </div>
+        <main id="FSmain" aria-live="polite"></main>
+      </div>
+
+      <form class="fm-card fm-upload-card" action="/upload" method="POST" enctype="multipart/form-data">
+        <div class="fm-card-header">
+          <div>
+            <h3 data-i18n-key="lbl-fm-upload">Bestand uploaden</h3>
+            <p data-i18n-key="txt-fm-upload-help">Kies een bestand om toe te voegen of te vervangen.</p>
+          </div>
+        </div>
+        <div class="fm-upload-controls">
+          <input id="Ifile" type="file" name="upload">
+          <input id="Iupload" type="submit" data-i18n-value="btn-fm-upload" value="Uploaden" disabled>
+        </div>
+        <div id="fmFileSize" class="fm-upload-status" aria-live="polite"></div>
+      </form>
+    </div>
+  </section>
+  
+ <section id="Logout" class="tabName">
+      <!-- START Tabbladen -->
+      <div id=logout>
+	  	<h2 class=align-c data-i18n-key="tle-logout">Logout</h2>
+      	<hr>
+        <h2>Je bent uitgelogd</h2>
+        <p>Je sessie is verlopen of je hebt zelf uitgelogd.</p>
+        <button onclick="location.href='/'">Inloggen opnieuw</button>
+
+      </div> 
+  </section> <!-- logout -->
+  
+  
+<section id="Reset" class="tabName">
+      <!-- START Tabbladen -->
+      <div id=eid-setup>
+	  	<h2 class=align-c data-i18n-key="tle-reset-update">Reset en Update</h2>
+      	<hr>
+        <div id="btnReboot" class="act_btn">
+      		<p data-i18n-key="txt-reboot">Na het indrukken van de REBOOT knop zal de Dongel opnieuw opstarten.</p>
+        	<span></span>
+			<form  action='/ReBoot'>
+				<input type='submit' class='button' name='SUBMIT' value='Reboot'>
+			</form>
+      	</div> 
+      	<br>
+     	<hr>
+      	<div id="btnResetWifi" class="act_btn">
+			<p data-i18n-key="txt-reset-wifi">Na het indrukken van de RESET WIFI knop zal de module herstarten en vragen om het wifi-netwerk opnieuw in te stellen. Zie initiÃ«le setup van de module.</p>
+			<span></span>
+			<form action='/ResetWifi' >
+			  <input id="resetWifi" type='submit' class='button' name='SUBMIT' value='Reset Wifi'/>
+			</form>
+      	</div> 
+
+      </div> 
+  </section> <!-- end Settings Page -->
+  
+  <section id="ESPHome" class="tabName">
+      <!-- START Tabbladen -->
+		<div id=eid-setup>
+	  		<h2 class=align-c data-i18n-key="tle-esphome">ESPHome</h2>
+	      	<div id="esphomeMigrationCard" class="act_btn">
+			<p id="esphomeTargetLabel"></p>
+			<p data-i18n-key="txt-esphome-migrate"></p>
+			<p id="esphomeManifestHelp" style="display:none"></p>
+			<div class=align-c><button id="esphomeMigrateButton" type="button" onclick='return showSystemActionDialog("esphome")' data-i18n-key="btn-migrate">MIGREER</button></div>
+			<p id="esphomeUnsupportedText" data-i18n-key="txt-esphome-unsupported" style="display:none"></p>
+	    </div> 
+  </section> <!-- end Settings Page -->
+  
+<section id="About" class="tabName">
+      <!-- START Tabbladen -->
+  <h2>About</h2>
+      <hr>
+      <p>P1 Dongle ten behoeven van het uitlezen van de slimme meter</p>
+	  <p>Huidige software versie dongle:</p><div id="current_verion"></div>
+      <p>Laatste software versie :</p><div id="latest_verion"></div>
+  </section> <!-- end Settings Page -->
+  
+	<section id="Redirect" class="tabName">
+	<h2 data-i18n-key="tle-reboot">Opnieuw opstarten</h2>
+	<h3><div id="RedirectMessage"></div></h3>
+	<div><b>Redirect over <span id='counter'>45</span> seconden.</b>
+	<hr>Indien de pagina niet automatisch getoond wordt klik dan op <a href='/'>Home pagina</a></div>
+    </section>  
+
+	<section id="Solar" class="tabName">
+		<div id=eid-setup>
+		<i id=pulse_ico class="iconify" data-icon="mdi-pulse"></i>
+		<h1 class=align-c>Solar Setup</h1><br>
+		<div data-i18n-key="sol-intro-1">Instellen van de koppeling met de PV omvormer om de opbrengst zichtbaar te maken in NRG Monitor. Deze configuratie is in te zien en te wijzigen via het bestandsbeheer van de dongle.<br>
+		<br>
+		</div>
+		<hr>
+		<form id="dataForm">
+		<p data-i18n-key="sol-sys">Welk systeem dient gekoppeld te worden?</p>
+ 		Â  <input type="radio" id="pv_enphase" name="solar_system" value="Enphase" onClick="ShowHidePV();" checked="checked">
+ 		Â  <label for="enphase">Enphase</label><br>
+		Â  <input type="radio" id="pv_solaredge" name="solar_system" value="SolarEdge" onClick="ShowHidePV();">
+		Â  <label for="solaredge">SolarEdge</label><br>
 		<br> 
 			<label for="wp" data-i18n-key="sol-wp">Systeemvermogen (Wp):</label><br>
 			<input type="number" id="wp" name="wp" value=3500><br><br>
@@ -1055,12 +1150,22 @@
 			<input type="number" id="interval" name="interval" value=10><br><br>
 			<label for="gw_url" data-i18n-key="sol-url">Gateway url of ip-adres:</label><br>
 			<input type="text" id="gw_url" name="gw_url" value="https://envoy/api/v1/production" style="width: 100%"><br><br>
-			<label for="token" data-i18n-key="sol-token">Token:</label><br>
-			<input type="text" id="token" name="token" placeholder="eg eyJraWQiOiI3ZDEwMDA1ZC03ODk5LTRk" style="width: 100%"><br><br>
 			<div id="conf_token" style="display: none">
 				<label for="siteid" data-i18n-key="sol-siteid">SiteID:</label><br>
 				<input type="number" id="siteid" name="siteid" placeholder="eg 125231"><br><br>
-			</div>	
+				<label for="solaredge_api_version">SolarEdge API:</label><br>
+				<select id="solaredge_api_version" onchange="UpdateSolarEdgeApiFields()">
+					<option value="1">Legacy API (V1)</option>
+					<option value="2">Developer Platform API (V2)</option>
+				</select><br><br>
+				<label id="solaredge_token_label" for="token">Legacy API key:</label><br>
+				<input type="text" id="token" name="token" placeholder="eg L4QLVQ1LOKCQX2193VSEICXW61NP6B1O" style="width: 100%"><br>
+				<small id="solaredge_api_help">Use an existing Monitoring API key. SolarEdge no longer issues new legacy keys.</small><br><br>
+			</div>
+			<div id="enphase_token">
+			<label for="token_enphase" data-i18n-key="sol-token">Token:</label><br>
+			<input type="text" id="token_enphase" name="token_enphase" placeholder="eg eyJraWQiOiI3ZDEwMDA1ZC03ODk5LTRk" style="width: 100%"><br><br>
+			</div>
 		<hr>						
 			<div class=align-c><button type="button" onclick="SolarSendData()" data-i18n-key="btn-save">Opslaan</button></div>
 		</form>    
@@ -1295,7 +1400,7 @@
 			<div id=legenda style="padding-top:25px">
 			</div>
     		<hr/>
-            <div style="text-align:center" data-i18n-key="lbl-today-kw">Power [kW]</div>
+			<div id="dash-accu-power-label" style="text-align:center" data-i18n-key="lbl-today-kw">Power [kW]</div>
             <h2 id=dash_accu_p>0.0</h2>
 			<div style="text-align:center" ><span data-i18n-key="lbl-accu-status">Status: </span><b><span id="accu-status">-</span></b></div>
         </div>	
@@ -1365,7 +1470,7 @@
 				<div class="lblVerbuik eergisteren">e<span class="tooltiptext" data-i18n-key="lbl-2daysago">Eergisteren</span></div>
 			</div>
             <hr/>
-            <div style="text-align:center" data-i18n-key="lbl-today-m3">Vandaag [㎥]</div>
+            <div style="text-align:center" data-i18n-key="lbl-today-m3">Vandaag [ãŽ¥]</div>
             <h2 id="G">0.0</h2>
         </div>
                 <div class=card id=l7 data-widget="l7" style="display:none">

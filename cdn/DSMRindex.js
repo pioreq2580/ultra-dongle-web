@@ -10,6 +10,30 @@ const SQUARE_M_CUBED 	   = "\u33A5";
 
 "use strict";
 
+// OTA_VERSION_BEGIN
+function parseOtaVersionParts(versionStr, forkOverride) {
+  const raw = String(versionStr || "").replace(/^[vV]/, "").replace(/\+/g, " ").trim();
+  const token = raw.split(/\s/)[0] || "";
+  const nums = token.split(".").map((n) => parseInt(n, 10)).filter((n) => !Number.isNaN(n));
+  const forkFromField = (forkOverride !== undefined && forkOverride !== null && forkOverride !== "")
+    ? parseInt(forkOverride, 10)
+    : NaN;
+  return {
+    major: nums[0] || 0,
+    minor: nums[1] || 0,
+    fix: nums[2] || 0,
+    fork: Number.isNaN(forkFromField) ? (nums[3] || 0) : forkFromField
+  };
+}
+
+function otaVersionIsNewer(remote, local) {
+  if (remote.major !== local.major) return remote.major > local.major;
+  if (remote.minor !== local.minor) return remote.minor > local.minor;
+  if (remote.fix !== local.fix) return remote.fix > local.fix;
+  return remote.fork > local.fork;
+}
+// OTA_VERSION_END
+
 //   let ota_url 				= "";
   let activeTab             = "bDashTab";
   let PauseAPI				= false; //pause api call when browser is inactive
@@ -59,6 +83,7 @@ const SQUARE_M_CUBED 	   = "\u33A5";
 	  let eid_planner_enabled	= false
 	  let pairing_enabled    	= false
 	  let Meter_Source          = "DSMR"
+	  let MeterEnergyFactor    = 1
 	  let esphomeManifestRequested = false;
 	  let esphomeMigrationTarget = null;
   
@@ -311,12 +336,25 @@ cfgGaugeWATER.options.plugins.labels.render = renderLabelWater;
 function ShowHidePV(){
 	if ( document.getElementById('pv_enphase').checked ) {
 		document.getElementById('conf_token').style.display = "none";
+		document.getElementById('enphase_token').style.display = "block";
 		document.getElementById('gw_url').value = "https://envoy/api/v1/production";
 	}
 	if ( document.getElementById('pv_solaredge').checked ) {
 		document.getElementById('conf_token').style.display = "block";
+		document.getElementById('enphase_token').style.display = "none";
 		document.getElementById('gw_url').value = "";
 	}
+	UpdateSolarEdgeApiFields();
+}
+
+function UpdateSolarEdgeApiFields(){
+	const version = document.getElementById('solaredge_api_version')?.value || '1';
+	const isV2 = version === '2';
+	document.getElementById('solaredge_token_label').textContent = isV2 ? 'SolarEdge API V2 key or Client Secret:' : 'Legacy API key:';
+	document.getElementById('token').placeholder = isV2 ? 'Value issued by the SolarEdge Developer Platform' : 'eg L4QLVQ1LOKCQX2193VSEICXW61NP6B1O';
+	document.getElementById('solaredge_api_help').textContent = isV2
+		? 'V2 sends this value as an X-API-Key header. Do not share it with anyone.'
+		: 'Use an existing Monitoring API key. SolarEdge no longer issues new legacy keys.';
 }
   
 let latestInsightData = null;
@@ -460,12 +498,14 @@ function InsightData(data){
 }
 
 function SolarSendData() {
+	const isSolarEdge = document.getElementById('pv_solaredge').checked;
 
 	const jsonData = {
 		"gateway-url"     : document.getElementById('gw_url').value,
 		wp                : parseInt(document.getElementById('wp').value),
 		"refresh-interval": parseInt(document.getElementById('interval').value),
-		token             : document.getElementById('token').value,
+		token             : document.getElementById(isSolarEdge ? 'token' : 'token_enphase').value,
+		"api-version"    : isSolarEdge ? parseInt(document.getElementById('solaredge_api_version').value) : 1,
 		expire            : 0,
 		siteid            : parseInt(document.getElementById('siteid').value)
 	};
@@ -487,1865 +527,6 @@ function SolarSendData() {
 
 }
 
-let heltyScanTimer = null;
-let heltyScanTimeoutTimer = null;
-let heltyTestTimer = null;
-let heltyCommandTimer = null;
-let heltyCommandStartedAt = 0;
-let heltyManagementTimer = null;
-let heltyUiState = { fan_mode: null, led: false };
-let heltyLastCommandPayload = null;
-const HELTY_SCAN_TIMEOUT_MS = 5 * 60 * 1000;
-const HELTY_SCAN_POLL_MS = 1000;
-const HELTY_MANAGEMENT_POLL_MS = 10000;
-const HELTY_CMD_IDLE = 0;
-const HELTY_CMD_RUNNING = 1;
-const HELTY_CMD_DONE = 2;
-const HELTY_CMD_ERROR = 3;
-const HELTY_CMD_POLL_MS = 1000;
-const HELTY_CMD_TIMEOUT_MS = 15000;
-
-function heltyApi(path, method, body) {
-  const opts = { method: method || "GET", headers: { "Content-Type": "application/json" } };
-  if (body !== undefined) opts.body = JSON.stringify(body);
-  return fetch(APIHOST + path, opts).then(async r => {
-    const text = await r.text();
-    if (!r.ok) throw new Error(text || ("HTTP " + r.status));
-    try { return JSON.parse(text); }
-    catch { throw new Error("Invalid JSON from device"); }
-  });
-}
-
-function heltySetStatus(elId, text, isError) {
-  const el = document.getElementById(elId);
-  if (!el) return;
-  el.textContent = text || "";
-  el.className = "helty-status" + (isError ? " helty-error" : "");
-}
-
-function fetchHeltyConfig() {
-  return heltyApi("/api/v2/helty/config").then(json => {
-    document.getElementById("helty_host").value = json.host || "";
-    document.getElementById("helty_port").value = json.port || 5001;
-    document.getElementById("helty_poll").value = json.poll_interval_sec || 30;
-    document.getElementById("helty_enabled").checked = !!json.enabled;
-    return json;
-  }).catch(err => {
-    console.error("Helty config load failed", err);
-  });
-}
-
-function heltySave() {
-  const payload = {
-    enabled: document.getElementById("helty_enabled").checked,
-    host: document.getElementById("helty_host").value.trim(),
-    port: parseInt(document.getElementById("helty_port").value, 10) || 5001,
-    poll_interval_sec: parseInt(document.getElementById("helty_poll").value, 10) || 30
-  };
-  heltyApi("/api/v2/helty/config", "POST", payload)
-    .then(() => {
-      heltySetStatus("helty_discover_status", "Configuration saved.", false);
-      if (payload.host) heltyTest();
-    })
-    .catch(err => heltySetStatus("helty_discover_status", "Save failed: " + err, true));
-}
-
-function heltyTest() {
-  const host = document.getElementById("helty_host").value.trim();
-  const port = parseInt(document.getElementById("helty_port").value, 10) || 5001;
-  if (!host) {
-    heltySetStatus("helty_discover_status", "Enter a host or IP address.", true);
-    return;
-  }
-  heltySetStatus("helty_discover_status", "Testing connection...", false);
-  heltyApi("/api/v2/helty/discover", "POST", { mode: "test", host, port })
-    .then(() => {
-      if (heltyTestTimer) clearInterval(heltyTestTimer);
-      heltyTestTimer = setInterval(heltyPollTestStatus, 2000);
-      heltyPollTestStatus();
-    })
-    .catch(err => heltySetStatus("helty_discover_status", "Test failed: " + err, true));
-}
-
-function heltyPollTestStatus() {
-  heltyApi("/api/v2/helty/discover")
-    .then(json => {
-      if (json.phase === 1) {
-        heltySetStatus("helty_discover_status", "Testing connection...", false);
-      } else if (json.phase === 3 && json.test_host) {
-        clearInterval(heltyTestTimer);
-        heltyTestTimer = null;
-        const msg = "Connected: " + (json.test_name || json.test_host);
-        heltySetStatus("helty_discover_status", msg + (document.getElementById("helty_enabled").checked ? "" : " — enable Air Guard hub to poll"), false);
-        if (json.test_name) {
-          const hostEl = document.getElementById("helty_host");
-          if (hostEl && !hostEl.value.trim()) hostEl.value = json.test_host;
-        }
-      } else if (json.phase === 4 && json.test_host) {
-        clearInterval(heltyTestTimer);
-        heltyTestTimer = null;
-        heltySetStatus("helty_discover_status", json.error || "Connection failed", true);
-      }
-    })
-    .catch(err => {
-      clearInterval(heltyTestTimer);
-      heltyTestTimer = null;
-      heltySetStatus("helty_discover_status", "Test failed: " + err, true);
-    });
-}
-
-function heltySetDiscoverButtonsDisabled(disabled) {
-  document.querySelectorAll("#HeltyDiscover button").forEach(btn => {
-    btn.disabled = !!disabled;
-  });
-}
-
-function heltyStopDiscoverPolling() {
-  if (heltyScanTimer) {
-    clearInterval(heltyScanTimer);
-    heltyScanTimer = null;
-  }
-  if (heltyScanTimeoutTimer) {
-    clearTimeout(heltyScanTimeoutTimer);
-    heltyScanTimeoutTimer = null;
-  }
-  if (heltyTestTimer) {
-    clearInterval(heltyTestTimer);
-    heltyTestTimer = null;
-  }
-  heltySetDiscoverButtonsDisabled(false);
-}
-
-function heltyFinishScan(message, isError) {
-  heltyStopDiscoverPolling();
-  heltySetStatus("helty_scan_progress", message, isError);
-}
-
-function heltyRenderScanResults(results) {
-  const table = document.getElementById("helty_scan_results");
-  const body = document.getElementById("helty_scan_results_body");
-  if (!table || !body) return;
-  body.innerHTML = "";
-  if (!results || !results.length) {
-    table.style.display = "none";
-    return;
-  }
-  results.forEach(item => {
-    const row = document.createElement("tr");
-    row.innerHTML = `<td>${item.name || "-"}</td><td>${item.host}</td><td><button type="button">Select</button></td>`;
-    row.querySelector("button").onclick = () => {
-      document.getElementById("helty_host").value = item.host;
-      heltySetStatus("helty_discover_status", "Selected " + (item.name || item.host), false);
-    };
-    body.appendChild(row);
-  });
-  table.style.display = "";
-}
-
-function heltyPollScanStatus() {
-  heltyApi("/api/v2/helty/discover")
-    .then(json => {
-      if (json.phase === 0) {
-        heltySetStatus("helty_scan_progress", "Scan queued...", false);
-      } else if (json.phase === 1) {
-        heltyFinishScan("Helty client busy (test or poll in progress)", true);
-      } else if (json.phase === 2) {
-        const partial = json.results || [];
-        if (partial.length) heltyRenderScanResults(partial);
-        const foundNote = partial.length
-          ? " — found " + partial.length + " device" + (partial.length === 1 ? "" : "s")
-          : "";
-        heltySetStatus("helty_scan_progress", "Scanning... " + (json.progress || 0) + "%" + foundNote, false);
-      } else if (json.phase === 3) {
-        const results = json.results || [];
-        heltyFinishScan(
-          results.length
-            ? "Scan complete."
-            : "Scan complete — no Air Guard devices found on this subnet.",
-          false
-        );
-        heltyRenderScanResults(results);
-      } else if (json.phase === 4) {
-        heltyFinishScan(json.error || "Scan failed", true);
-      }
-    })
-    .catch(err => {
-      heltyFinishScan("Scan status failed: " + err, true);
-    });
-}
-
-function heltyScan() {
-  if (heltyScanTimer) return;
-  const host = document.getElementById("helty_host").value.trim();
-  if (host) {
-    heltySetStatus("helty_scan_progress", "Known IP configured — testing " + host + " instead of scanning subnet.", false);
-    heltyTest();
-    return;
-  }
-  heltySetStatus("helty_scan_progress", "Starting network scan...", false);
-  document.getElementById("helty_scan_results").style.display = "none";
-  heltySetDiscoverButtonsDisabled(true);
-  const port = parseInt(document.getElementById("helty_port").value, 10) || 5001;
-  heltyApi("/api/v2/helty/discover", "POST", { mode: "scan", port })
-    .then(() => {
-      heltyStopDiscoverPolling();
-      heltySetDiscoverButtonsDisabled(true);
-      heltyScanTimer = setInterval(heltyPollScanStatus, HELTY_SCAN_POLL_MS);
-      heltyPollScanStatus();
-      heltyScanTimeoutTimer = setTimeout(() => {
-        if (heltyScanTimer) heltyFinishScan("Scan timed out", true);
-      }, HELTY_SCAN_TIMEOUT_MS);
-    })
-    .catch(err => {
-      heltyFinishScan("Scan start failed: " + err, true);
-    });
-}
-
-function heltyFormatValue(label, value, unit) {
-  if (value === undefined || value === null || value === "") return "";
-  return `<div class="card"><h1>${label}</h1><h2>${value}${unit ? " " + unit : ""}</h2></div>`;
-}
-
-function heltyEscapeHtml(str) {
-  return String(str || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-
-function heltyFormatDisplayName(name) {
-  if (!name) return "";
-  return String(name).trim().split(/[\s_]+/).filter(Boolean).map(word => {
-    if (word.length <= 3) return word.toUpperCase();
-    return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
-  }).join(" ");
-}
-
-function heltyBuildDeviceLine(json) {
-  const displayName = heltyFormatDisplayName(json.name);
-  const host = json.host || "";
-  if (displayName && host) return heltyEscapeHtml(displayName) + " · " + heltyEscapeHtml(host);
-  return heltyEscapeHtml(displayName || host);
-}
-
-function heltyUpdateStatusBadge(json) {
-  const statusEl = document.getElementById("helty_status_badge");
-  if (!statusEl) return;
-
-  let stateClass;
-  let icon;
-  let label;
-  let deviceLine = "";
-
-  if (!json.enabled) {
-    stateClass = "helty-warn";
-    icon = "mdi-power-off";
-    label = t("helty-status-hub-disabled");
-  } else if (json.connected) {
-    stateClass = "helty-ok";
-    icon = "mdi-check-circle";
-    label = t("helty-status-online");
-    deviceLine = heltyBuildDeviceLine(json);
-  } else if (json.valid) {
-    stateClass = "helty-warn";
-    icon = "mdi-clock-alert-outline";
-    label = t("helty-status-stale");
-    if (json.last_poll_age_sec !== undefined) label += " (" + json.last_poll_age_sec + "s)";
-    deviceLine = heltyBuildDeviceLine(json);
-  } else {
-    stateClass = "helty-error";
-    icon = "mdi-lan-disconnect";
-    label = t("helty-status-offline");
-    if (json.host) deviceLine = heltyEscapeHtml(json.host);
-  }
-
-  statusEl.className = "helty-status-bar " + stateClass;
-  statusEl.innerHTML =
-    `<span class="iconify helty-status-icon" data-icon="${icon}"></span>` +
-    `<div class="helty-status-text">` +
-      `<div class="helty-status-label">${heltyEscapeHtml(label)}</div>` +
-      (deviceLine ? `<div class="helty-status-device">${deviceLine}</div>` : "") +
-    `</div>`;
-}
-
-function heltyUpdateTelemetryGrid(json) {
-  const grid = document.getElementById("helty_telemetry");
-  if (!grid) return;
-  let html = "";
-  html += heltyFormatValue(t("helty-tx-fan-mode"), json.fan_mode);
-  html += heltyFormatValue(t("helty-tx-indoor-temp"), json.indoor_temperature, "°C");
-  html += heltyFormatValue(t("helty-tx-outdoor-temp"), json.outdoor_temperature, "°C");
-  html += heltyFormatValue(t("helty-tx-humidity"), json.indoor_humidity, "%");
-  if (json.co2 > 0) html += heltyFormatValue(t("helty-tx-co2"), json.co2, "ppm");
-  if (json.voc > 0) html += heltyFormatValue(t("helty-tx-voc"), json.voc, "ppb");
-  if (json.filter_hours) html += heltyFormatValue(t("helty-tx-filter-hours"), json.filter_hours);
-  if (json.last_poll_age_sec !== undefined) html += heltyFormatValue(t("helty-tx-last-update"), json.last_poll_age_sec, "s ago");
-  grid.innerHTML = html || `<div class="helty-status">${t("helty-tx-none")}</div>`;
-}
-
-function heltySeedUiState(json) {
-  if (json.fan_mode) heltyUiState.fan_mode = json.fan_mode;
-  if (json.led !== undefined) heltyUiState.led = !!json.led;
-  heltyRenderControlGrid();
-}
-
-function heltyRenderControlGrid() {
-  const grid = document.getElementById("helty_ctrl_grid");
-  if (!grid) return;
-  grid.querySelectorAll("[data-fan-mode]").forEach(btn => {
-    btn.classList.toggle("helty-ctrl-active", btn.dataset.fanMode === heltyUiState.fan_mode);
-  });
-  const ledBtn = grid.querySelector('[data-action="led"]');
-  if (ledBtn) ledBtn.classList.toggle("helty-ctrl-active", !!heltyUiState.led);
-}
-
-function heltySetControlGridDisabled(disabled) {
-  document.querySelectorAll("#helty_ctrl_grid .helty-ctrl-btn").forEach(btn => {
-    btn.disabled = !!disabled;
-  });
-}
-
-function heltyRefreshManagement() {
-  const refreshBtn = document.getElementById("helty_refresh_btn");
-  if (refreshBtn) refreshBtn.disabled = true;
-  return heltyApi("/api/v2/helty/live").then(json => {
-    heltyUpdateStatusBadge(json);
-    heltyUpdateTelemetryGrid(json);
-    return json;
-  }).catch(err => {
-    heltySetStatus("helty_manage_message", "Refresh failed: " + err, true);
-  }).finally(() => {
-    if (refreshBtn) refreshBtn.disabled = false;
-  });
-}
-
-function heltySendFanMode(mode) {
-  if (!mode || heltyCommandTimer) return;
-  heltyUiState.fan_mode = mode;
-  heltyRenderControlGrid();
-  const payload = { fan_mode: mode };
-  heltyLastCommandPayload = payload;
-  heltyStartCommand(payload, "Command applied.", "Command failed");
-}
-
-function heltySendLed() {
-  if (heltyCommandTimer) return;
-  heltyUiState.led = !heltyUiState.led;
-  heltyRenderControlGrid();
-  const payload = { led: heltyUiState.led };
-  heltyLastCommandPayload = payload;
-  heltyStartCommand(payload, "Command applied.", "Command failed");
-}
-
-function heltySendResetFilter() {
-  if (heltyCommandTimer) return;
-  if (!window.confirm(t("helty-reset-filter-confirm") || "Reset filter counter on the unit?")) return;
-  heltyLastCommandPayload = { reset_filter: true };
-  heltyStartCommand({ reset_filter: true }, "Filter counter reset.", "Reset failed");
-}
-
-function heltyFinishCommand(successMsg, failureMsg, isError) {
-  if (heltyCommandTimer) clearInterval(heltyCommandTimer);
-  heltyCommandTimer = null;
-  heltyCommandStartedAt = 0;
-  heltySetControlGridDisabled(false);
-  heltySetStatus("helty_manage_message", isError ? failureMsg : successMsg, isError);
-  if (!isError && heltyLastCommandPayload) {
-    if (heltyLastCommandPayload.fan_mode) heltyUiState.fan_mode = heltyLastCommandPayload.fan_mode;
-    if (heltyLastCommandPayload.led !== undefined) heltyUiState.led = heltyLastCommandPayload.led;
-    heltyRenderControlGrid();
-  }
-  heltyLastCommandPayload = null;
-}
-
-function heltyPollCommandStatus(successMsg, failurePrefix) {
-  if (heltyCommandStartedAt && (Date.now() - heltyCommandStartedAt) > HELTY_CMD_TIMEOUT_MS) {
-    heltyFinishCommand(successMsg, failurePrefix + " (timeout)", true);
-    return;
-  }
-
-  heltyApi("/api/v2/helty/command")
-    .then(json => {
-      if (json.phase === HELTY_CMD_RUNNING) {
-        heltySetControlGridDisabled(true);
-        heltySetStatus("helty_manage_message", "Sending command...", false);
-      } else if (json.phase === HELTY_CMD_DONE && json.ok) {
-        heltyFinishCommand(successMsg, json.error || failurePrefix, false);
-      } else if (json.phase === HELTY_CMD_ERROR || (json.phase === HELTY_CMD_DONE && !json.ok)) {
-        heltyFinishCommand(successMsg, json.error || failurePrefix, true);
-      }
-    })
-    .catch(err => {
-      heltyFinishCommand(successMsg, failurePrefix + ": " + err, true);
-    });
-}
-
-function heltyStartCommand(payload, successMsg, failurePrefix) {
-  heltyApi("/api/v2/helty/command", "POST", payload)
-    .then(() => {
-      if (heltyCommandTimer) clearInterval(heltyCommandTimer);
-      heltyCommandStartedAt = Date.now();
-      heltySetControlGridDisabled(true);
-      heltyCommandTimer = setInterval(() => heltyPollCommandStatus(successMsg, failurePrefix), HELTY_CMD_POLL_MS);
-      heltyPollCommandStatus(successMsg, failurePrefix);
-    })
-    .catch(err => {
-      heltySetControlGridDisabled(false);
-      heltySetStatus("helty_manage_message", failurePrefix + ": " + err, true);
-      heltyLastCommandPayload = null;
-    });
-}
-
-function heltyStartManagement() {
-  heltyApi("/api/v2/helty/live")
-    .then(json => {
-      heltySeedUiState(json);
-      heltyUpdateStatusBadge(json);
-      heltyUpdateTelemetryGrid(json);
-    })
-    .catch(err => heltySetStatus("helty_manage_message", "Load failed: " + err, true));
-  heltyRefreshManagement();
-  if (heltyManagementTimer) clearInterval(heltyManagementTimer);
-  heltyManagementTimer = setInterval(heltyRefreshManagement, HELTY_MANAGEMENT_POLL_MS);
-}
-
-function heltyStopManagementPolling() {
-  if (heltyManagementTimer) {
-    clearInterval(heltyManagementTimer);
-    heltyManagementTimer = null;
-  }
-}
-
-function initHeltyControlGrid() {
-  const grid = document.getElementById("helty_ctrl_grid");
-  if (!grid || grid.dataset.bound) return;
-  grid.dataset.bound = "1";
-  grid.addEventListener("click", event => {
-    const btn = event.target.closest(".helty-ctrl-btn");
-    if (!btn || btn.disabled) return;
-    const mode = btn.dataset.fanMode;
-    const action = btn.dataset.action;
-    if (mode) heltySendFanMode(mode);
-    else if (action === "led") heltySendLed();
-    else if (action === "reset-filter") heltySendResetFilter();
-  });
-}
-
-function heltyStartDiscover() {
-  fetchHeltyConfig().then(json => {
-    heltyStopDiscoverPolling();
-    if (json && json.host) {
-      heltySetStatus("helty_discover_status", "Testing configured host " + json.host + "...", false);
-      heltyTest();
-    }
-  });
-}
-
-let euromScanTimer = null;
-let euromScanTimeoutTimer = null;
-let euromTestTimer = null;
-let euromManagementTimer = null;
-let euromCommandTimer = null;
-let euromCommandStartedAt = 0;
-let euromLastCommandPayload = null;
-let euromUiState = { on: false, setpoint_c: null };
-const EUROM_SCAN_TIMEOUT_MS = 5 * 60 * 1000;
-const EUROM_SCAN_POLL_MS = 1000;
-const EUROM_MANAGEMENT_POLL_MS = 10000;
-const EUROM_CMD_IDLE = 0;
-const EUROM_CMD_RUNNING = 1;
-const EUROM_CMD_DONE = 2;
-const EUROM_CMD_ERROR = 3;
-const EUROM_CMD_POLL_MS = 1000;
-const EUROM_CMD_TIMEOUT_MS = 20000;
-const EUROM_SETPOINT_MIN = 0;
-const EUROM_SETPOINT_MAX = 37;
-
-function euromApi(path, method, body) {
-  const opts = { method: method || "GET", headers: { "Content-Type": "application/json" } };
-  if (body !== undefined) opts.body = JSON.stringify(body);
-  return fetch(APIHOST + path, opts).then(async r => {
-    const text = await r.text();
-    if (!r.ok) throw new Error(text || ("HTTP " + r.status));
-    try { return JSON.parse(text); }
-    catch { throw new Error("Invalid JSON from device"); }
-  });
-}
-
-function euromSetStatus(elId, text, isError) {
-  const el = document.getElementById(elId);
-  if (!el) return;
-  el.textContent = text || "";
-  el.className = "helty-status" + (isError ? " helty-error" : "");
-}
-
-function fetchEuromConfig() {
-  return euromApi("/api/v2/eurom/config").then(json => {
-    document.getElementById("eurom_host").value = json.host || "";
-    document.getElementById("eurom_port").value = json.port || 6668;
-    document.getElementById("eurom_poll").value = json.poll_interval_sec || 30;
-    document.getElementById("eurom_enabled").checked = !!json.enabled;
-    document.getElementById("eurom_name").value = json.name || "";
-    document.getElementById("eurom_device_id").value = json.device_id || "";
-    document.getElementById("eurom_protocol").value = json.protocol || "3.3";
-    const hint = document.getElementById("eurom_key_hint");
-    if (hint) hint.textContent = json.local_key_set ? t("eurom-key-set") : t("eurom-key-missing");
-    return json;
-  }).catch(err => {
-    console.error("EUROM config load failed", err);
-  });
-}
-
-function euromSave() {
-  const payload = {
-    enabled: document.getElementById("eurom_enabled").checked,
-    host: document.getElementById("eurom_host").value.trim(),
-    port: parseInt(document.getElementById("eurom_port").value, 10) || 6668,
-    poll_interval_sec: parseInt(document.getElementById("eurom_poll").value, 10) || 30,
-    name: document.getElementById("eurom_name").value.trim(),
-    device_id: document.getElementById("eurom_device_id").value.trim(),
-    protocol: document.getElementById("eurom_protocol").value || "3.3"
-  };
-  const key = document.getElementById("eurom_local_key").value.trim();
-  if (key) payload.local_key = key;
-  euromApi("/api/v2/eurom/config", "POST", payload)
-    .then(() => {
-      document.getElementById("eurom_local_key").value = "";
-      euromSetStatus("eurom_discover_status", t("eurom-saved"), false);
-      fetchEuromConfig();
-      if (payload.host) euromTest();
-    })
-    .catch(err => euromSetStatus("eurom_discover_status", "Save failed: " + err, true));
-}
-
-function euromTest() {
-  const host = document.getElementById("eurom_host").value.trim();
-  const port = parseInt(document.getElementById("eurom_port").value, 10) || 6668;
-  if (!host) {
-    euromSetStatus("eurom_discover_status", t("eurom-host-required"), true);
-    return;
-  }
-  euromSetStatus("eurom_discover_status", t("eurom-testing"), false);
-  euromApi("/api/v2/eurom/discover", "POST", { mode: "test", host, port })
-    .then(() => {
-      if (euromTestTimer) clearInterval(euromTestTimer);
-      euromTestTimer = setInterval(euromPollTestStatus, 2000);
-      euromPollTestStatus();
-    })
-    .catch(err => euromSetStatus("eurom_discover_status", "Test failed: " + err, true));
-}
-
-function euromPollTestStatus() {
-  euromApi("/api/v2/eurom/discover")
-    .then(json => {
-      if (json.phase === 1) {
-        euromSetStatus("eurom_discover_status", t("eurom-testing"), false);
-      } else if (json.phase === 3 && json.test_host) {
-        clearInterval(euromTestTimer);
-        euromTestTimer = null;
-        const extra = json.test_device_id ? " (" + json.test_device_id + ")" : "";
-        const warn = json.error ? " — " + json.error : "";
-        euromSetStatus("eurom_discover_status", t("eurom-test-ok") + extra + warn, false);
-      } else if (json.phase === 4 && json.test_host) {
-        clearInterval(euromTestTimer);
-        euromTestTimer = null;
-        euromSetStatus("eurom_discover_status", json.error || t("eurom-test-fail"), true);
-      }
-    })
-    .catch(err => {
-      clearInterval(euromTestTimer);
-      euromTestTimer = null;
-      euromSetStatus("eurom_discover_status", "Test failed: " + err, true);
-    });
-}
-
-function euromSetDiscoverButtonsDisabled(disabled) {
-  document.querySelectorAll("#EuromDiscover button").forEach(btn => {
-    btn.disabled = !!disabled;
-  });
-}
-
-function euromStopDiscoverPolling() {
-  if (euromScanTimer) {
-    clearInterval(euromScanTimer);
-    euromScanTimer = null;
-  }
-  if (euromScanTimeoutTimer) {
-    clearTimeout(euromScanTimeoutTimer);
-    euromScanTimeoutTimer = null;
-  }
-  if (euromTestTimer) {
-    clearInterval(euromTestTimer);
-    euromTestTimer = null;
-  }
-  euromSetDiscoverButtonsDisabled(false);
-}
-
-function euromFinishScan(message, isError) {
-  euromStopDiscoverPolling();
-  euromSetStatus("eurom_scan_progress", message, isError);
-}
-
-function euromSelectResult(item) {
-  if (!item) return;
-  if (item.host) document.getElementById("eurom_host").value = item.host;
-  if (item.device_id) document.getElementById("eurom_device_id").value = item.device_id;
-  const ver = String(item.version || "");
-  if (ver.indexOf("3.5") === 0) document.getElementById("eurom_protocol").value = "3.5";
-  else if (ver.indexOf("3.4") === 0) document.getElementById("eurom_protocol").value = "3.4";
-  else if (ver.indexOf("3.3") === 0 || ver.indexOf("3.1") === 0 || ver.indexOf("3.2") === 0) {
-    document.getElementById("eurom_protocol").value = "3.3";
-  }
-  euromSetStatus("eurom_discover_status", t("eurom-selected") + " " + (item.host || "") + (item.device_id ? " / " + item.device_id : ""), false);
-}
-
-function euromRenderScanResults(results) {
-  const table = document.getElementById("eurom_scan_results");
-  const body = document.getElementById("eurom_scan_results_body");
-  if (!table || !body) return;
-  body.innerHTML = "";
-  if (!results || !results.length) {
-    table.style.display = "none";
-    return;
-  }
-  results.forEach(item => {
-    const row = document.createElement("tr");
-    row.innerHTML = `<td>${item.host || "-"}</td><td>${item.device_id || "-"}</td><td>${item.version || item.source || "-"}</td><td><button type="button">Select</button></td>`;
-    row.querySelector("button").onclick = () => euromSelectResult(item);
-    body.appendChild(row);
-  });
-  table.style.display = "";
-}
-
-function euromPollScanStatus() {
-  euromApi("/api/v2/eurom/discover")
-    .then(json => {
-      if (json.phase === 0) {
-        euromSetStatus("eurom_scan_progress", t("eurom-scan-queued"), false);
-      } else if (json.phase === 1) {
-        euromFinishScan(t("eurom-busy"), true);
-      } else if (json.phase === 2) {
-        const partial = json.results || [];
-        if (partial.length) euromRenderScanResults(partial);
-        const foundNote = partial.length
-          ? " — " + partial.length + " " + t("eurom-found")
-          : "";
-        euromSetStatus("eurom_scan_progress", t("eurom-scanning") + " " + (json.progress || 0) + "%" + foundNote, false);
-      } else if (json.phase === 3) {
-        const results = json.results || [];
-        euromFinishScan(results.length ? t("eurom-scan-done") : t("eurom-scan-empty"), false);
-        euromRenderScanResults(results);
-        if (results.length === 1) euromSelectResult(results[0]);
-      } else if (json.phase === 4) {
-        euromFinishScan(json.error || t("eurom-scan-fail"), true);
-      }
-    })
-    .catch(err => {
-      euromFinishScan("Scan status failed: " + err, true);
-    });
-}
-
-function euromScan() {
-  if (euromScanTimer) return;
-  euromSetStatus("eurom_scan_progress", t("eurom-scan-start"), false);
-  document.getElementById("eurom_scan_results").style.display = "none";
-  euromSetDiscoverButtonsDisabled(true);
-  euromApi("/api/v2/eurom/discover", "POST", { mode: "scan" })
-    .then(() => {
-      euromStopDiscoverPolling();
-      euromSetDiscoverButtonsDisabled(true);
-      euromScanTimer = setInterval(euromPollScanStatus, EUROM_SCAN_POLL_MS);
-      euromPollScanStatus();
-      euromScanTimeoutTimer = setTimeout(() => {
-        if (euromScanTimer) euromFinishScan(t("eurom-scan-timeout"), true);
-      }, EUROM_SCAN_TIMEOUT_MS);
-    })
-    .catch(err => {
-      euromFinishScan("Scan start failed: " + err, true);
-    });
-}
-
-function euromEscapeHtml(str) {
-  return String(str ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-
-function euromUpdateStatusBadge(json) {
-  const statusEl = document.getElementById("eurom_status_badge");
-  if (!statusEl) return;
-  let stateClass;
-  let icon;
-  let label;
-  let deviceLine = "";
-  if (!json.enabled) {
-    stateClass = "helty-warn";
-    icon = "mdi-power-off";
-    label = t("eurom-status-hub-disabled");
-  } else if (json.connected) {
-    stateClass = "helty-ok";
-    icon = "mdi-check-circle";
-    label = t("eurom-status-online");
-    deviceLine = euromEscapeHtml(json.name || json.host || "");
-  } else if (json.valid) {
-    stateClass = "helty-warn";
-    icon = "mdi-clock-alert-outline";
-    label = t("eurom-status-stale");
-    if (json.last_poll_age_sec !== undefined) label += " (" + json.last_poll_age_sec + "s)";
-    deviceLine = euromEscapeHtml(json.name || json.host || "");
-  } else {
-    stateClass = "helty-error";
-    icon = "mdi-lan-disconnect";
-    label = t("eurom-status-offline");
-    if (json.host) deviceLine = euromEscapeHtml(json.host);
-    if (json.error) deviceLine = (deviceLine ? deviceLine + " · " : "") + euromEscapeHtml(json.error);
-  }
-  statusEl.className = "helty-status-bar " + stateClass;
-  statusEl.innerHTML =
-    `<span class="iconify helty-status-icon" data-icon="${icon}"></span>` +
-    `<div class="helty-status-text">` +
-      `<div class="helty-status-label">${euromEscapeHtml(label)}</div>` +
-      (deviceLine ? `<div class="helty-status-device">${deviceLine}</div>` : "") +
-    `</div>`;
-  if (window.Iconify && Iconify.scan) Iconify.scan(statusEl);
-}
-
-function euromUpdateTelemetryGrid(json) {
-  const grid = document.getElementById("eurom_telemetry");
-  if (!grid) return;
-  const dash = t("eurom-none");
-  const card = (label, value, unit) => {
-    const empty = value === undefined || value === null || value === "";
-    const shown = empty ? dash : value;
-    return `<div class="card"><h1>${euromEscapeHtml(label)}</h1><h2>${euromEscapeHtml(shown)}${!empty && unit ? " " + unit : ""}</h2></div>`;
-  };
-  let html = "";
-  html += card(t("eurom-tx-connected"), json.connected ? t("eurom-status-online") : t("eurom-status-offline"));
-  html += card(t("eurom-tx-on"), json.on ? t("eurom-on") : t("eurom-off"));
-  html += card(t("eurom-tx-setpoint"), json.setpoint_c, "°C");
-  html += card(t("eurom-tx-temp"), json.temperature_c, "°C");
-  if (json.unit_f) html += card(t("eurom-tx-unit"), "°F");
-  html += card(t("eurom-tx-timer"), json.timer_min, "min");
-  html += card(t("eurom-tx-timer-on"), json.timer_on === undefined ? "" : (json.timer_on ? t("eurom-on") : t("eurom-off")));
-  html += card(t("eurom-tx-schedule"), json.schedule_mode);
-  if (json.last_poll_age_sec !== undefined) html += card(t("eurom-tx-last-poll"), json.last_poll_age_sec, "s");
-  else html += card(t("eurom-tx-last-poll"), json.last_poll);
-  html += card(t("eurom-tx-error"), json.error);
-  grid.innerHTML = html || `<div class="helty-status">${t("eurom-tx-none")}</div>`;
-}
-
-function euromRefreshLive() {
-  const refreshBtn = document.getElementById("eurom_refresh_btn");
-  if (refreshBtn) refreshBtn.disabled = true;
-  return euromApi("/api/v2/eurom/live").then(json => {
-    if (!euromCommandTimer) euromSetStatus("eurom_manage_message", "", false);
-    euromUpdateStatusBadge(json);
-    euromUpdateTelemetryGrid(json);
-    euromSeedUiState(json);
-    return json;
-  }).catch(err => {
-    euromSetStatus("eurom_manage_message", "Refresh failed: " + err, true);
-  }).finally(() => {
-    if (refreshBtn) refreshBtn.disabled = false;
-  });
-}
-
-function euromSeedUiState(json) {
-  if (json && json.on !== undefined) euromUiState.on = !!json.on;
-  if (json && json.setpoint_c !== undefined && json.setpoint_c !== null) {
-    euromUiState.setpoint_c = parseInt(json.setpoint_c, 10);
-  }
-  euromRenderControls();
-}
-
-function euromRenderControls() {
-  document.querySelectorAll("#eurom_ctrl_grid [data-action]").forEach(btn => {
-    const action = btn.dataset.action;
-    btn.classList.toggle("helty-ctrl-active",
-      (action === "on" && euromUiState.on) || (action === "off" && !euromUiState.on));
-  });
-  const valueEl = document.getElementById("eurom_setpoint_value");
-  if (valueEl) {
-    valueEl.textContent = Number.isFinite(euromUiState.setpoint_c)
-      ? euromUiState.setpoint_c + " °C"
-      : "—";
-  }
-}
-
-function euromSetControlsDisabled(disabled) {
-  document.querySelectorAll("#eurom_ctrl_grid .helty-ctrl-btn, .eurom-setpoint-btn").forEach(btn => {
-    btn.disabled = !!disabled;
-  });
-}
-
-function euromFinishCommand(successMsg, failureMsg, isError) {
-  if (euromCommandTimer) clearInterval(euromCommandTimer);
-  euromCommandTimer = null;
-  euromCommandStartedAt = 0;
-  euromSetControlsDisabled(false);
-  euromSetStatus("eurom_manage_message", isError ? failureMsg : successMsg, isError);
-  euromLastCommandPayload = null;
-  euromRefreshLive();
-}
-
-function euromPollCommandStatus(successMsg, failurePrefix) {
-  if (euromCommandStartedAt && (Date.now() - euromCommandStartedAt) > EUROM_CMD_TIMEOUT_MS) {
-    euromFinishCommand(successMsg, t("eurom-cmd-timeout") || (failurePrefix + " (timeout)"), true);
-    return;
-  }
-
-  euromApi("/api/v2/eurom/command")
-    .then(json => {
-      if (json.phase === EUROM_CMD_RUNNING) {
-        euromSetControlsDisabled(true);
-        euromSetStatus("eurom_manage_message", t("eurom-cmd-sending"), false);
-      } else if (json.phase === EUROM_CMD_DONE && json.ok) {
-        euromFinishCommand(successMsg, json.error || failurePrefix, false);
-      } else if (json.phase === EUROM_CMD_ERROR || (json.phase === EUROM_CMD_DONE && !json.ok)) {
-        euromFinishCommand(successMsg, json.error || failurePrefix, true);
-      }
-    })
-    .catch(err => {
-      euromFinishCommand(successMsg, failurePrefix + ": " + err, true);
-    });
-}
-
-function euromStartCommand(payload, successMsg, failurePrefix) {
-  euromLastCommandPayload = payload;
-  euromApi("/api/v2/eurom/command", "POST", payload)
-    .then(() => {
-      if (euromCommandTimer) clearInterval(euromCommandTimer);
-      euromCommandStartedAt = Date.now();
-      euromSetControlsDisabled(true);
-      euromCommandTimer = setInterval(() => euromPollCommandStatus(successMsg, failurePrefix), EUROM_CMD_POLL_MS);
-      euromPollCommandStatus(successMsg, failurePrefix);
-    })
-    .catch(err => {
-      euromSetControlsDisabled(false);
-      euromSetStatus("eurom_manage_message", failurePrefix + ": " + err, true);
-      euromLastCommandPayload = null;
-    });
-}
-
-function euromSendPower(on) {
-  if (euromCommandTimer) return;
-  euromUiState.on = !!on;
-  euromRenderControls();
-  euromStartCommand({ on: !!on }, t("eurom-cmd-ok"), t("eurom-cmd-fail"));
-}
-
-function euromSendSetpoint(next) {
-  if (euromCommandTimer) return;
-  const value = Math.max(EUROM_SETPOINT_MIN, Math.min(EUROM_SETPOINT_MAX, next | 0));
-  euromUiState.setpoint_c = value;
-  euromRenderControls();
-  euromStartCommand({ setpoint_c: value }, t("eurom-cmd-ok"), t("eurom-cmd-fail"));
-}
-
-function initEuromControlGrid() {
-  const grid = document.getElementById("eurom_ctrl_grid");
-  if (grid && !grid.dataset.bound) {
-    grid.dataset.bound = "1";
-    grid.addEventListener("click", event => {
-      const btn = event.target.closest(".helty-ctrl-btn");
-      if (!btn || btn.disabled) return;
-      if (btn.dataset.action === "on") euromSendPower(true);
-      else if (btn.dataset.action === "off") euromSendPower(false);
-    });
-  }
-  document.querySelectorAll(".eurom-setpoint-btn").forEach(btn => {
-    if (btn.dataset.bound) return;
-    btn.dataset.bound = "1";
-    btn.addEventListener("click", () => {
-      if (btn.disabled) return;
-      const current = Number.isFinite(euromUiState.setpoint_c) ? euromUiState.setpoint_c : 18;
-      if (btn.dataset.action === "setpoint-down") euromSendSetpoint(current - 1);
-      else if (btn.dataset.action === "setpoint-up") euromSendSetpoint(current + 1);
-    });
-  });
-}
-
-function euromStartManagement() {
-  initEuromControlGrid();
-  euromRefreshLive();
-  if (euromManagementTimer) clearInterval(euromManagementTimer);
-  euromManagementTimer = setInterval(euromRefreshLive, EUROM_MANAGEMENT_POLL_MS);
-}
-
-function euromStopManagementPolling() {
-  if (euromManagementTimer) {
-    clearInterval(euromManagementTimer);
-    euromManagementTimer = null;
-  }
-}
-
-function euromStartDiscover() {
-  fetchEuromConfig();
-  euromStopDiscoverPolling();
-}
-
-let wizScanTimer = null;
-let wizPageTimer = null;
-let wizConfiguredLights = [];
-let wizConfiguredRooms = [];
-let wizPollSec = 30;
-let wizRgbDebounce = {};
-let wizCctDebounce = {};
-let wizScanSelectedMacs = new Set();
-
-const WIZ_SCAN_POLL_MS = 1000;
-const WIZ_PAGE_POLL_MS = 5000;
-const WIZ_CMD_REFRESH_MS = 400;
-const WIZ_RGB_DEBOUNCE_MS = 180;
-const WIZ_CCT_DEBOUNCE_MS = 350;
-const WIZ_CCT_MIN = 2700;
-const WIZ_CCT_MAX = 6500;
-const WIZ_SCAN_TIMEOUT_MS = 120000;
-const WIZ_DISCOVER_SCANNING = 1;
-const WIZ_DISCOVER_DONE = 2;
-const WIZ_DISCOVER_ERROR = 3;
-const WIZ_MOCK_MAC = "aabbccddeeff";
-
-function wizApi(path, method, body) {
-  const opts = { method: method || "GET", headers: { "Content-Type": "application/json" } };
-  if (body !== undefined) opts.body = JSON.stringify(body);
-  return fetch(APIHOST + path, opts).then(async r => {
-    const text = await r.text();
-    if (!r.ok) throw new Error(text || ("HTTP " + r.status));
-    try { return JSON.parse(text); }
-    catch { throw new Error("Invalid JSON from device"); }
-  });
-}
-
-function wizEscapeHtml(text) {
-  return String(text || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
-}
-
-function wizRgbToHex(r, g, b) {
-  const h = n => ("0" + Math.max(0, Math.min(255, n | 0)).toString(16)).slice(-2);
-  return "#" + h(r) + h(g) + h(b);
-}
-
-function wizHexToRgb(hex) {
-  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex || "");
-  if (!m) return { r: 255, g: 255, b: 255 };
-  return { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) };
-}
-
-function wizRgbChannel(value, fallback) {
-  if (value === undefined || value === null || value === "") return fallback;
-  const n = parseInt(value, 10);
-  if (Number.isNaN(n)) return fallback;
-  return Math.max(0, Math.min(255, n));
-}
-
-function wizRgbToHsv(r, g, b) {
-  r = wizRgbChannel(r, 0) / 255;
-  g = wizRgbChannel(g, 0) / 255;
-  b = wizRgbChannel(b, 0) / 255;
-  const max = Math.max(r, g, b);
-  const min = Math.min(r, g, b);
-  const d = max - min;
-  let h = 0;
-  if (d > 0) {
-    if (max === r) h = ((g - b) / d) % 6;
-    else if (max === g) h = (b - r) / d + 2;
-    else h = (r - g) / d + 4;
-    h *= 60;
-    if (h < 0) h += 360;
-  }
-  return { h: h, s: max === 0 ? 0 : d / max, v: max };
-}
-
-function wizHsvToRgb(h, s, v) {
-  h = ((h % 360) + 360) % 360;
-  s = Math.max(0, Math.min(1, s));
-  v = Math.max(0, Math.min(1, v));
-  const c = v * s;
-  const x = c * (1 - Math.abs((h / 60) % 2 - 1));
-  const m = v - c;
-  let r = 0, g = 0, b = 0;
-  if (h < 60) { r = c; g = x; }
-  else if (h < 120) { r = x; g = c; }
-  else if (h < 180) { g = c; b = x; }
-  else if (h < 240) { g = x; b = c; }
-  else if (h < 300) { r = x; b = c; }
-  else { r = c; b = x; }
-  return {
-    r: Math.round((r + m) * 255),
-    g: Math.round((g + m) * 255),
-    b: Math.round((b + m) * 255)
-  };
-}
-
-function wizIsGenericName(light) {
-  const name = String((light && light.name) || "").trim();
-  if (!name) return true;
-  if (light.mac && name === light.mac) return true;
-  if (light.mac && name === "WiZ " + light.mac) return true;
-  if (light.module_name && name === light.module_name) return true;
-  if (/^ESP\d+_/.test(name)) return true;
-  return false;
-}
-
-function wizDisplayName(light) {
-  if (!wizIsGenericName(light)) return light.name;
-  return (light && light.mac) || (light && light.name) || "";
-}
-
-function wizMetaLine(light) {
-  const parts = [];
-  if (light.module_name && light.module_name !== light.name) parts.push(light.module_name);
-  if (light.ip) parts.push(light.ip);
-  if (light.mac) parts.push(light.mac);
-  return parts.join(" · ");
-}
-
-function wizIsMockLight(light) {
-  if (!light) return true;
-  const mac = String(light.mac || "").toLowerCase();
-  if (mac === WIZ_MOCK_MAC) return true;
-  const label = String(light.name || light.module_name || "");
-  return /mock/i.test(label);
-}
-
-function wizLightIsRgb(light) {
-  if (!light) return false;
-  if (light.rgb === true) return true;
-  const moduleName = String(light.module_name || light.name || "");
-  if (/RGB/i.test(moduleName)) return true;
-  if (light.rgb === false) return false;
-  return false;
-}
-
-function wizRoomSectionKey(roomId) {
-  return "room-" + (roomId || 0);
-}
-
-function wizRoomDisplayName(roomId) {
-  if (!roomId) return typeof t === "function" ? t("wiz-room-unassigned") : "Unassigned";
-  const room = wizConfiguredRooms.find(r => r.id === roomId);
-  if (room && room.name) return room.name;
-  return typeof t === "function" ? t("wiz-room-unnamed") : "Unnamed room";
-}
-
-function wizScanRoomLabel(item) {
-  if (item.room) return item.room;
-  if (item.room_id) return wizRoomDisplayName(item.room_id);
-  return "—";
-}
-
-function wizGroupLightsByRoom(lights) {
-  const groups = new Map();
-  lights.forEach(light => {
-    const key = String(light.room_id || 0);
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(light);
-  });
-  return [...groups.entries()].sort((a, b) => {
-    const idA = parseInt(a[0], 10) || 0;
-    const idB = parseInt(b[0], 10) || 0;
-    if (idA === 0) return 1;
-    if (idB === 0) return -1;
-    return wizRoomDisplayName(idA).localeCompare(wizRoomDisplayName(idB));
-  });
-}
-
-function wizLightIsCct(light) {
-  if (!light) return false;
-  if (light.cct === true || light.temp) return true;
-  const moduleName = String(light.module_name || light.name || "");
-  if (/SHRGB|_TW|TW_|RGB/i.test(moduleName)) return true;
-  if (light.cct === false) return false;
-  return false;
-}
-
-function wizApplyI18n(root) {
-  if (typeof applyTranslations === "function") applyTranslations(root);
-}
-
-function wizSetInputValue(el, value) {
-  if (!el || document.activeElement === el) return;
-  el.value = value;
-}
-
-function wizSetStatus(text, isError) {
-  const el = document.getElementById("wiz_status");
-  if (!el) return;
-  el.textContent = text || "";
-  el.className = "wiz-status" + (isError ? " wiz-error" : "");
-}
-
-function wizStopPolling() {
-  if (wizScanTimer) { clearInterval(wizScanTimer); wizScanTimer = null; }
-  if (wizPageTimer) { clearInterval(wizPageTimer); wizPageTimer = null; }
-}
-
-function wizPagePollMs() {
-  const sec = Math.max(10, parseInt(wizPollSec, 10) || 30);
-  return sec * 1000;
-}
-
-function wizShouldPoll() {
-  return activeTab === "bWizLights" && document.visibilityState === "visible";
-}
-
-function wizLoadConfig() {
-  return wizApi("/api/v2/wiz/config").then(json => {
-    document.getElementById("wiz_enabled").checked = !!json.enabled;
-    document.getElementById("wiz_poll").value = json.poll_sec || 30;
-    wizPollSec = json.poll_sec || 30;
-    wizConfiguredRooms = json.rooms || [];
-    wizConfiguredLights = (json.lights || []).filter(l => !wizIsMockLight(l)).map(l => ({
-      mac: l.mac,
-      ip: l.ip,
-      name: l.name,
-      room: l.room || "",
-      room_id: l.room_id || 0,
-      enabled: l.enabled !== false
-    }));
-    return json;
-  });
-}
-
-function wizSaveConfig() {
-  const payload = {
-    enabled: document.getElementById("wiz_enabled").checked,
-    poll_sec: parseInt(document.getElementById("wiz_poll").value, 10) || 30,
-    rooms: wizConfiguredRooms,
-    lights: wizConfiguredLights.filter(l => !wizIsMockLight(l))
-  };
-  return wizApi("/api/v2/wiz/config", "POST", payload)
-    .then(() => wizSetStatus("Configuration saved.", false))
-    .catch(err => wizSetStatus("Save failed: " + err, true));
-}
-
-function wizSaveRoomName(roomId, name) {
-  roomId = parseInt(roomId, 10) || 0;
-  if (!roomId) return Promise.resolve();
-  const trimmed = (name || "").trim();
-  let room = wizConfiguredRooms.find(r => r.id === roomId);
-  if (room) room.name = trimmed;
-  else wizConfiguredRooms.push({ id: roomId, name: trimmed });
-  wizConfiguredLights.forEach(l => {
-    if (l.room_id === roomId) l.room = trimmed;
-  });
-  return wizSaveConfig();
-}
-
-function wizRoomCommand(roomId, on) {
-  roomId = parseInt(roomId, 10) || 0;
-  if (!roomId) return;
-  wizSendCommand({ room_id: roomId, on: on });
-}
-
-function wizScanProgressText(json) {
-  const pct = json.progress || 0;
-  const found = (json.results || []).length;
-  const foundNote = found ? " — found " + found + " light" + (found === 1 ? "" : "s") : "";
-  if (json.scan_phase === "broadcast") {
-    return (typeof t === "function" ? t("wiz-scan-broadcast") : "Broadcast…") + " " + pct + "%" + foundNote;
-  }
-  if (json.scan_phase === "subnet" && json.scan_last_host) {
-    return (typeof t === "function" ? t("wiz-scan-subnet") : "Scanning") + " " + json.scan_last_host + " (" + pct + "%)" + foundNote;
-  }
-  if (json.scan_phase === "configured") {
-    return (typeof t === "function" ? t("wiz-scan-configured") : "Checking saved lights…") + foundNote;
-  }
-  if (json.scan_phase === "probe") {
-    return (typeof t === "function" ? t("wiz-scan-probe") : "Probing") + " " + (json.scan_last_host || "") + "…";
-  }
-  return (typeof t === "function" ? t("wiz-scan-progress") : "Scanning…") + " " + pct + "%" + foundNote;
-}
-
-function wizStatusBadge(light) {
-  if (!light.online) return typeof t === "function" ? t("wiz-status-offline") : "Offline";
-  if (!light.on) return typeof t === "function" ? t("wiz-status-off") : "Off";
-  return typeof t === "function" ? t("wiz-status-online") : "Online";
-}
-
-function wizCardClass(light) {
-  if (!light.online) return " wiz-offline";
-  if (!light.on) return " wiz-off";
-  return " wiz-online";
-}
-
-function wizBindScanTable() {
-  const body = document.getElementById("wiz_scan_body");
-  if (!body || body.dataset.bound) return;
-  body.dataset.bound = "1";
-  body.addEventListener("change", event => {
-    const el = event.target;
-    if (!el.classList.contains("wiz-scan-check") || !el.dataset.mac) return;
-    if (el.checked) wizScanSelectedMacs.add(el.dataset.mac);
-    else wizScanSelectedMacs.delete(el.dataset.mac);
-  });
-}
-
-function wizScan() {
-  wizScanSelectedMacs = new Set();
-  wizSetStatus(typeof t === "function" ? t("wiz-scan-starting") : "Starting network scan...", false);
-  document.getElementById("wiz_scan_progress").textContent = "";
-  const scanBody = document.getElementById("wiz_scan_body");
-  if (scanBody) scanBody.innerHTML = "";
-  document.getElementById("wiz_scan_table").style.display = "none";
-  wizApi("/api/v2/wiz/discover", "POST", {})
-    .then(() => {
-      if (wizScanTimer) clearInterval(wizScanTimer);
-      wizScanTimer = setInterval(wizPollScan, WIZ_SCAN_POLL_MS);
-      wizPollScan();
-    })
-    .catch(err => wizSetStatus("Scan failed: " + err, true));
-}
-
-function wizProbeIp() {
-  const input = document.getElementById("wiz_probe_ip");
-  const ip = input ? input.value.trim() : "";
-  if (!ip) {
-    wizSetStatus(typeof t === "function" ? t("wiz-probe-ip-required") : "Enter an IP address.", true);
-    return;
-  }
-  wizSetStatus((typeof t === "function" ? t("wiz-scan-probe") : "Probing") + " " + ip + "...", false);
-  wizApi("/api/v2/wiz/discover", "POST", { mode: "probe", ip: ip })
-    .then(() => {
-      if (wizScanTimer) clearInterval(wizScanTimer);
-      wizScanTimer = setInterval(wizPollScan, WIZ_SCAN_POLL_MS);
-      wizPollScan();
-    })
-    .catch(err => wizSetStatus("Probe failed: " + err, true));
-}
-
-function wizPollScan() {
-  if (!wizShouldPoll()) return;
-  wizApi("/api/v2/wiz/discover")
-    .then(json => {
-      const prog = document.getElementById("wiz_scan_progress");
-      if (json.phase === WIZ_DISCOVER_SCANNING) {
-        const partial = (json.results || []).filter(item => !wizIsMockLight(item));
-        if (partial.length) wizRenderScanResults(partial);
-        prog.textContent = wizScanProgressText(json);
-      } else if (json.phase === WIZ_DISCOVER_DONE) {
-        if (wizScanTimer) { clearInterval(wizScanTimer); wizScanTimer = null; }
-        prog.textContent = "";
-        const results = (json.results || []).filter(item => !wizIsMockLight(item));
-        wizRenderScanResults(results);
-        const n = results.length;
-        wizSetStatus(n
-          ? ((typeof t === "function" ? t("wiz-scan-done") : "Found") + " " + n + " light(s).")
-          : (typeof t === "function" ? t("wiz-scan-none") : "Scan complete — no WiZ lights found on this subnet."), false);
-      } else if (json.phase === WIZ_DISCOVER_ERROR) {
-        if (wizScanTimer) { clearInterval(wizScanTimer); wizScanTimer = null; }
-        prog.textContent = "";
-        wizSetStatus(json.error || "Scan failed", true);
-      }
-    })
-    .catch(err => {
-      if (wizScanTimer) { clearInterval(wizScanTimer); wizScanTimer = null; }
-      wizSetStatus("Scan poll failed: " + err, true);
-    });
-}
-
-function wizRenderScanResults(results) {
-  const table = document.getElementById("wiz_scan_table");
-  const body = document.getElementById("wiz_scan_body");
-  if (!table || !body) return;
-  wizBindScanTable();
-  if (!results.length) { table.style.display = "none"; return; }
-  table.style.display = "table";
-
-  document.querySelectorAll(".wiz-scan-check:checked").forEach(ch => {
-    if (ch.dataset.mac) wizScanSelectedMacs.add(ch.dataset.mac);
-  });
-
-  const known = new Set((wizConfiguredLights || []).map(l => l.mac));
-  const existing = new Map();
-  body.querySelectorAll("tr[data-mac]").forEach(tr => existing.set(tr.dataset.mac, tr));
-
-  results.forEach(item => {
-    if (!item.mac) return;
-    const already = known.has(item.mac);
-    const label = wizDisplayName(item);
-    const roomId = item.room_id || 0;
-    const roomLabel = wizScanRoomLabel(item);
-    let tr = existing.get(item.mac);
-    if (!tr) {
-      tr = document.createElement("tr");
-      tr.dataset.mac = item.mac;
-      tr.innerHTML =
-        "<td><input type='checkbox' class='wiz-scan-check' data-mac='" + wizEscapeHtml(item.mac) + "'></td>" +
-        "<td><strong></strong></td>" +
-        "<td class='wiz-scan-room'></td>" +
-        "<td class='wiz-scan-ip'></td>" +
-        "<td class='wiz-mac-cell'></td>";
-      body.appendChild(tr);
-    }
-    const check = tr.querySelector(".wiz-scan-check");
-    if (check) {
-      check.dataset.mac = item.mac;
-      check.dataset.ip = item.ip || "";
-      check.dataset.name = label;
-      check.dataset.roomId = String(roomId);
-      check.dataset.room = item.room || "";
-      check.disabled = already;
-      if (already) {
-        check.checked = false;
-        wizScanSelectedMacs.delete(item.mac);
-      } else if (wizScanSelectedMacs.has(item.mac)) {
-        check.checked = true;
-      }
-    }
-    const nameEl = tr.querySelector("strong");
-    if (nameEl) nameEl.textContent = label;
-    const roomEl = tr.querySelector(".wiz-scan-room");
-    if (roomEl) roomEl.textContent = roomLabel;
-    const ipEl = tr.querySelector(".wiz-scan-ip");
-    if (ipEl) ipEl.textContent = item.ip || "";
-    const macEl = tr.querySelector(".wiz-mac-cell");
-    if (macEl) macEl.textContent = item.mac;
-  });
-}
-
-function wizAddSelected() {
-  const checks = document.querySelectorAll(".wiz-scan-check:checked");
-  if (!checks.length) {
-    wizSetStatus("Select at least one light.", true);
-    return;
-  }
-  const known = new Set((wizConfiguredLights || []).map(l => l.mac));
-  checks.forEach(ch => {
-    const mac = ch.dataset.mac;
-    if (!mac || known.has(mac) || mac === WIZ_MOCK_MAC) return;
-    const roomId = parseInt(ch.dataset.roomId, 10) || 0;
-    const roomName = ch.dataset.room || "";
-    wizConfiguredLights.push({
-      mac: mac,
-      ip: ch.dataset.ip || "",
-      name: (ch.dataset.name && ch.dataset.name !== ch.dataset.mac) ? ch.dataset.name : mac,
-      room_id: roomId,
-      room: roomName,
-      enabled: true
-    });
-    if (roomId && roomName) {
-      const room = wizConfiguredRooms.find(r => r.id === roomId);
-      if (room) room.name = roomName;
-      else wizConfiguredRooms.push({ id: roomId, name: roomName });
-    }
-    known.add(mac);
-  });
-  wizSaveConfig().then(() => wizRefreshLights());
-}
-
-function wizRefreshLights(force) {
-  if (!force && !wizShouldPoll()) return Promise.resolve();
-  return wizApi("/api/v2/wiz/lights")
-    .then(json => {
-      wizPollSec = json.poll_sec || wizPollSec;
-      wizConfiguredRooms = json.rooms || wizConfiguredRooms;
-      wizConfiguredLights = (json.lights || [])
-        .filter(l => !wizIsMockLight(l))
-        .map(l => ({
-          mac: l.mac, ip: l.ip, name: l.name, room: l.room || "", room_id: l.room_id || 0,
-          enabled: l.enabled !== false
-        }));
-      wizRenderLightGrid((json.lights || []).filter(l => !wizIsMockLight(l)));
-    })
-    .catch(err => wizSetStatus("Load failed: " + err, true));
-}
-
-function wizBuildRgbHtml(light) {
-  if (!wizLightIsRgb(light)) return "";
-  const r = wizRgbChannel(light.r, 255);
-  const g = wizRgbChannel(light.g, 255);
-  const b = wizRgbChannel(light.b, 255);
-  const hsv = wizRgbToHsv(r, g, b);
-  const hex = wizRgbToHex(r, g, b);
-  return (
-    "<div class='wiz-rgb-controls' data-mac='" + wizEscapeHtml(light.mac) +
-      "' data-r='" + r + "' data-g='" + g + "' data-b='" + b + "' data-h='" + hsv.h.toFixed(1) + "'>" +
-      "<div class='wiz-color-picker'>" +
-        "<div class='wiz-color-head'>" +
-          "<span class='wiz-ctrl-label' data-i18n-key='wiz-color'>Color</span>" +
-          "<span class='wiz-color-swatch' style='background:" + hex + "' aria-hidden='true'></span>" +
-        "</div>" +
-        "<div class='wiz-sv-pad' role='slider' aria-label='Color'>" +
-          "<div class='wiz-sv-cursor' style='left:" + ((hsv.h / 360) * 100).toFixed(1) +
-            "%;top:" + (hsv.s * 100).toFixed(1) + "%'></div>" +
-        "</div>" +
-      "</div>" +
-    "</div>"
-  );
-}
-
-function wizBuildCctHtml(light) {
-  if (!wizLightIsCct(light)) return "";
-  const temp = Math.max(WIZ_CCT_MIN, Math.min(WIZ_CCT_MAX, parseInt(light.temp, 10) || 4200));
-  return (
-    "<div class='wiz-cct-controls' data-mac='" + wizEscapeHtml(light.mac) + "'>" +
-      "<label class='wiz-cct-label'><span data-i18n-key='wiz-cct'>Color temperature</span>" +
-        "<input type='range' min='" + WIZ_CCT_MIN + "' max='" + WIZ_CCT_MAX + "' step='100' value='" + temp + "' class='wiz-temp' data-mac='" + wizEscapeHtml(light.mac) + "'>" +
-        "<span class='wiz-temp-label'>" + temp + " K</span>" +
-      "</label>" +
-    "</div>"
-  );
-}
-
-function wizBuildCardHtml(light) {
-  const dimPct = Math.round((light.dimming || 0) * 100 / 255);
-  const displayName = wizDisplayName(light);
-  const meta = wizMetaLine(light);
-  return (
-    "<h1 class='wiz-badge'>" + wizEscapeHtml(wizStatusBadge(light)) + "</h1>" +
-    "<div class='wiz-card-body'>" +
-      "<div class='wiz-card-head'>" +
-        "<div class='wiz-title-block'>" +
-          "<input type='text' class='wiz-name-input' value='" + wizEscapeHtml(displayName) + "' data-mac='" + wizEscapeHtml(light.mac) + "' data-i18n-placeholder='wiz-name-placeholder' placeholder='Light name'>" +
-        "</div>" +
-        "<button type='button' class='wiz-remove' data-mac='" + wizEscapeHtml(light.mac) + "' title='Remove'>&times;</button>" +
-      "</div>" +
-      (meta ? "<div class='wiz-card-meta'>" + wizEscapeHtml(meta) + "</div>" : "") +
-      "<div class='wiz-card-controls'>" +
-        "<label><input type='checkbox' class='wiz-toggle' data-mac='" + wizEscapeHtml(light.mac) + "'" + (light.on ? " checked" : "") + "> <span data-i18n-key='wiz-on'>On</span></label>" +
-        "<input type='range' min='0' max='100' value='" + dimPct + "' class='wiz-dim' data-mac='" + wizEscapeHtml(light.mac) + "'>" +
-        "<span class='wiz-dim-label'>" + dimPct + "%</span>" +
-      "</div>" +
-      wizBuildRgbHtml(light) +
-      wizBuildCctHtml(light) +
-    "</div>"
-  );
-}
-
-function wizUpdateLightCard(card, light) {
-  card.dataset.mac = light.mac;
-  card.className = "card wiz-card" + wizCardClass(light);
-
-  const badge = card.querySelector(".wiz-badge");
-  if (badge) badge.textContent = wizStatusBadge(light);
-
-  const meta = card.querySelector(".wiz-card-meta");
-  const metaText = wizMetaLine(light);
-  if (metaText) {
-    if (meta) meta.textContent = metaText;
-    else {
-      const head = card.querySelector(".wiz-card-head");
-      if (head) {
-        const metaEl = document.createElement("div");
-        metaEl.className = "wiz-card-meta";
-        metaEl.textContent = metaText;
-        head.insertAdjacentElement("afterend", metaEl);
-      }
-    }
-  } else if (meta) {
-    meta.remove();
-  }
-
-  wizSetInputValue(card.querySelector(".wiz-name-input"), wizDisplayName(light));
-
-  const toggle = card.querySelector(".wiz-toggle");
-  if (toggle && document.activeElement !== toggle) toggle.checked = !!light.on;
-
-  const dim = card.querySelector(".wiz-dim");
-  const dimPct = Math.round((light.dimming || 0) * 100 / 255);
-  wizSetInputValue(dim, String(dimPct));
-  const dimLabel = card.querySelector(".wiz-dim-label");
-  if (dimLabel && document.activeElement !== dim) dimLabel.textContent = dimPct + "%";
-
-  const body = card.querySelector(".wiz-card-body") || card;
-  let rgbBlock = card.querySelector(".wiz-rgb-controls");
-  if (wizLightIsRgb(light)) {
-    const html = wizBuildRgbHtml(light);
-    if (!rgbBlock || !rgbBlock.querySelector(".wiz-sv-pad") || rgbBlock.querySelector(".wiz-hue")) {
-      if (rgbBlock) rgbBlock.outerHTML = html;
-      else {
-        const cct = card.querySelector(".wiz-cct-controls");
-        if (cct) cct.insertAdjacentHTML("beforebegin", html);
-        else body.insertAdjacentHTML("beforeend", html);
-      }
-      rgbBlock = card.querySelector(".wiz-rgb-controls");
-    } else {
-      wizSyncRgbInputs(rgbBlock, wizRgbChannel(light.r, 255), wizRgbChannel(light.g, 255), wizRgbChannel(light.b, 255));
-    }
-  } else if (rgbBlock) {
-    rgbBlock.remove();
-  }
-
-  let cctBlock = card.querySelector(".wiz-cct-controls");
-  if (wizLightIsCct(light)) {
-    const temp = Math.max(WIZ_CCT_MIN, Math.min(WIZ_CCT_MAX, parseInt(light.temp, 10) || 4200));
-    if (!cctBlock) {
-      body.insertAdjacentHTML("beforeend", wizBuildCctHtml(light));
-      cctBlock = card.querySelector(".wiz-cct-controls");
-    } else {
-      wizSetInputValue(cctBlock.querySelector(".wiz-temp"), String(temp));
-      const tempLabel = cctBlock.querySelector(".wiz-temp-label");
-      if (tempLabel && document.activeElement !== cctBlock.querySelector(".wiz-temp")) {
-        tempLabel.textContent = temp + " K";
-      }
-    }
-  } else if (cctBlock) {
-    cctBlock.remove();
-  }
-}
-
-function wizCreateLightCard(light) {
-  const card = document.createElement("div");
-  card.className = "card wiz-card" + wizCardClass(light);
-  card.dataset.mac = light.mac;
-  card.innerHTML = wizBuildCardHtml(light);
-  return card;
-}
-
-function wizEnsureRoomSection(grid, roomId) {
-  const key = wizRoomSectionKey(roomId);
-  let section = grid.querySelector('.wiz-room[data-room-key="' + key + '"]');
-  if (!section) {
-    section = document.createElement("div");
-    section.className = "wiz-room";
-    section.dataset.roomKey = key;
-    section.dataset.roomId = String(roomId || 0);
-    if (roomId) {
-      section.innerHTML =
-        "<div class='wiz-room-head'>" +
-          "<span class='wiz-room-title'></span>" +
-          "<div class='wiz-room-actions'>" +
-            "<button type='button' class='wiz-room-on' data-room-id='" + roomId + "' data-i18n-key='wiz-btn-all-on'>All on</button>" +
-            "<button type='button' class='wiz-room-off' data-room-id='" + roomId + "' data-i18n-key='wiz-btn-all-off'>All off</button>" +
-          "</div>" +
-        "</div>" +
-        "<div class='wiz-room-grid'></div>";
-    } else {
-      section.innerHTML =
-        "<div class='wiz-room-head wiz-room-head-static'>" +
-          "<span class='wiz-room-title' data-i18n-key='wiz-room-unassigned'>Unassigned</span>" +
-        "</div>" +
-        "<div class='wiz-room-grid'></div>";
-    }
-    grid.appendChild(section);
-  }
-  const leftover = section.querySelector(".wiz-room-name-input");
-  if (leftover) leftover.remove();
-  const titleEl = section.querySelector(".wiz-room-title");
-  if (titleEl && roomId) {
-    const room = wizConfiguredRooms.find(r => r.id === roomId);
-    const name = room && room.name ? String(room.name).trim() : "";
-    titleEl.textContent = name;
-    titleEl.style.display = name ? "" : "none";
-  }
-  return section.querySelector(".wiz-room-grid");
-}
-
-function wizInitLightGrid() {
-  const grid = document.getElementById("wiz_light_grid");
-  if (!grid || grid.dataset.bound) return;
-  grid.dataset.bound = "1";
-
-  grid.addEventListener("change", event => {
-    const el = event.target;
-    const mac = el.dataset.mac;
-    if (!mac) return;
-
-    if (el.classList.contains("wiz-toggle")) {
-      const card = el.closest(".wiz-card");
-      wizSendCommand({ mac: mac, on: el.checked }, card);
-      return;
-    }
-    if (el.classList.contains("wiz-dim")) {
-      const pct = parseInt(el.value, 10) || 0;
-      const label = el.parentElement.querySelector(".wiz-dim-label");
-      if (label) label.textContent = pct + "%";
-      const card = el.closest(".wiz-card");
-      const payload = { mac: mac, on: true, dimming: Math.round(pct * 255 / 100) };
-      wizApplyCardRgb(card, payload);
-      wizSendCommand(payload, card);
-      return;
-    }
-    if (el.classList.contains("wiz-temp")) {
-      const temp = parseInt(el.value, 10) || WIZ_CCT_MIN;
-      const card = el.closest(".wiz-card");
-      const tempLabel = el.parentElement.querySelector(".wiz-temp-label");
-      if (tempLabel) tempLabel.textContent = temp + " K";
-      wizSendTempDebounced(mac, temp, card);
-      return;
-    }
-    if (el.classList.contains("wiz-name-input")) {
-      const item = wizConfiguredLights.find(l => l.mac === mac);
-      if (item) item.name = el.value.trim() || mac;
-      wizSaveConfig();
-    }
-  });
-
-  grid.addEventListener("input", event => {
-    const el = event.target;
-    if (el.classList.contains("wiz-temp")) {
-      const temp = parseInt(el.value, 10) || WIZ_CCT_MIN;
-      const tempLabel = el.parentElement && el.parentElement.querySelector(".wiz-temp-label");
-      if (tempLabel) tempLabel.textContent = temp + " K";
-    }
-  });
-
-  grid.addEventListener("pointerdown", event => {
-    const pad = event.target.closest(".wiz-sv-pad");
-    if (!pad || !grid.contains(pad)) return;
-    event.preventDefault();
-    pad.setPointerCapture(event.pointerId);
-    pad.dataset.dragging = "1";
-    const block = pad.closest(".wiz-rgb-controls");
-    if (block) block.dataset.dragging = "1";
-    wizApplySvPointer(block, event, false);
-  });
-
-  grid.addEventListener("pointermove", event => {
-    const pad = event.target.closest(".wiz-sv-pad");
-    if (!pad || pad.dataset.dragging !== "1") return;
-    wizApplySvPointer(pad.closest(".wiz-rgb-controls"), event, false);
-  });
-
-  const endSvDrag = event => {
-    const pad = event.target.closest(".wiz-sv-pad");
-    if (!pad || pad.dataset.dragging !== "1") return;
-    pad.dataset.dragging = "";
-    const block = pad.closest(".wiz-rgb-controls");
-    if (block) block.dataset.dragging = "";
-    wizApplySvPointer(block, event, true);
-  };
-  grid.addEventListener("pointerup", endSvDrag);
-  grid.addEventListener("pointercancel", endSvDrag);
-
-  grid.addEventListener("click", event => {
-    const roomOn = event.target.closest(".wiz-room-on");
-    if (roomOn) {
-      wizRoomCommand(roomOn.dataset.roomId, true);
-      return;
-    }
-    const roomOff = event.target.closest(".wiz-room-off");
-    if (roomOff) {
-      wizRoomCommand(roomOff.dataset.roomId, false);
-      return;
-    }
-    const btn = event.target.closest(".wiz-remove");
-    if (!btn) return;
-    wizConfiguredLights = wizConfiguredLights.filter(l => l.mac !== btn.dataset.mac);
-    wizSaveConfig().then(() => wizRefreshLights());
-  });
-}
-
-function wizRenderLightGrid(lights) {
-  const grid = document.getElementById("wiz_light_grid");
-  if (!grid) return;
-  wizInitLightGrid();
-
-  if (!lights.length) {
-    grid.innerHTML = "<p class='wiz-empty' data-i18n-key='wiz-no-lights'>No lights configured yet. Scan and add bulbs above.</p>";
-    return;
-  }
-
-  const existingCards = new Map();
-  grid.querySelectorAll(".wiz-card").forEach(card => {
-    if (card.dataset.mac) existingCards.set(card.dataset.mac, card);
-  });
-
-  const seenMacs = new Set();
-  const seenRoomKeys = new Set();
-  const groups = wizGroupLightsByRoom(lights);
-
-  groups.forEach(([roomKey, roomLights]) => {
-    const roomId = parseInt(roomKey, 10) || 0;
-    seenRoomKeys.add(wizRoomSectionKey(roomId));
-    const roomGrid = wizEnsureRoomSection(grid, roomId);
-
-    roomLights.forEach(light => {
-      seenMacs.add(light.mac);
-      let card = existingCards.get(light.mac);
-      if (card) {
-        if (card.parentElement !== roomGrid) roomGrid.appendChild(card);
-        wizUpdateLightCard(card, light);
-      } else {
-        roomGrid.appendChild(wizCreateLightCard(light));
-      }
-    });
-  });
-
-  existingCards.forEach((card, mac) => {
-    if (!seenMacs.has(mac)) card.remove();
-  });
-
-  grid.querySelectorAll(".wiz-room").forEach(section => {
-    const roomGrid = section.querySelector(".wiz-room-grid");
-    if (!seenRoomKeys.has(section.dataset.roomKey)) {
-      section.remove();
-      return;
-    }
-    if (roomGrid && !roomGrid.querySelector(".wiz-card")) section.remove();
-  });
-
-  const empty = grid.querySelector(".wiz-empty");
-  if (empty) empty.remove();
-  wizApplyI18n(grid);
-}
-
-function wizRgbIsBusy(block) {
-  if (!block) return false;
-  if (block.dataset.dragging === "1") return true;
-  const mac = block.dataset.mac;
-  return !!(mac && wizRgbDebounce[mac]);
-}
-
-function wizPaintRgbPicker(block, r, g, b, keepHue) {
-  if (!block) return;
-  r = wizRgbChannel(r, 255);
-  g = wizRgbChannel(g, 255);
-  b = wizRgbChannel(b, 255);
-  block.dataset.r = String(r);
-  block.dataset.g = String(g);
-  block.dataset.b = String(b);
-  const hsv = wizRgbToHsv(r, g, b);
-  let h = hsv.h;
-  if (keepHue || hsv.s < 0.02) {
-    const stored = parseFloat(block.dataset.h);
-    if (!Number.isNaN(stored)) h = stored;
-  }
-  block.dataset.h = String(h);
-  const cursor = block.querySelector(".wiz-sv-cursor");
-  if (cursor) {
-    cursor.style.left = ((h / 360) * 100).toFixed(1) + "%";
-    cursor.style.top = (hsv.s * 100).toFixed(1) + "%";
-  }
-  const swatch = block.querySelector(".wiz-color-swatch");
-  if (swatch) swatch.style.background = wizRgbToHex(r, g, b);
-}
-
-function wizSyncRgbInputs(block, r, g, b) {
-  if (!block || wizRgbIsBusy(block)) return;
-  wizPaintRgbPicker(block, r, g, b, false);
-}
-
-function wizReadRgbBlock(block) {
-  if (!block) return { r: 255, g: 255, b: 255 };
-  return {
-    r: wizRgbChannel(block.dataset.r, 255),
-    g: wizRgbChannel(block.dataset.g, 255),
-    b: wizRgbChannel(block.dataset.b, 255)
-  };
-}
-
-function wizRgbFromPad(block, clientX, clientY) {
-  const pad = block && block.querySelector(".wiz-sv-pad");
-  if (!pad) return wizReadRgbBlock(block);
-  const rect = pad.getBoundingClientRect();
-  const h = rect.width ? Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)) * 360 : 0;
-  const s = rect.height ? Math.max(0, Math.min(1, (clientY - rect.top) / rect.height)) : 1;
-  block.dataset.h = String(h);
-  return wizHsvToRgb(h, s, 1);
-}
-
-function wizPushRgb(block, rgb, commit) {
-  if (!block || !rgb) return;
-  wizPaintRgbPicker(block, rgb.r, rgb.g, rgb.b, true);
-  const card = block.closest(".wiz-card");
-  if (commit) wizSendRgb(block.dataset.mac, rgb.r, rgb.g, rgb.b, card);
-  else wizSendRgbDebounced(block.dataset.mac, rgb.r, rgb.g, rgb.b, card);
-}
-
-function wizApplySvPointer(block, event, commit) {
-  if (!block || !event) return;
-  wizPushRgb(block, wizRgbFromPad(block, event.clientX, event.clientY), commit);
-}
-
-function wizOptimisticCard(card, payload) {
-  if (!card) return;
-  if (payload.on !== undefined) {
-    card.classList.remove("wiz-off", "wiz-online", "wiz-offline");
-    card.classList.add(payload.on ? "wiz-online" : "wiz-off");
-    const badge = card.querySelector(".wiz-badge");
-    if (badge) badge.textContent = wizStatusBadge({ online: true, on: payload.on });
-  }
-  if (payload.dimming !== undefined) {
-    const dimPct = Math.round(payload.dimming * 100 / 255);
-    wizSetInputValue(card.querySelector(".wiz-dim"), String(dimPct));
-    const dimLabel = card.querySelector(".wiz-dim-label");
-    if (dimLabel) dimLabel.textContent = dimPct + "%";
-  }
-  if (payload.r !== undefined) {
-    const block = card.querySelector(".wiz-rgb-controls");
-    wizSyncRgbInputs(block, payload.r, payload.g, payload.b);
-  }
-}
-
-function wizCardDimming(card) {
-  const dim = card && card.querySelector(".wiz-dim");
-  if (!dim) return 255;
-  return Math.round((parseInt(dim.value, 10) || 0) * 255 / 100);
-}
-
-function wizApplyCardRgb(card, payload) {
-  if (!card || !card.querySelector(".wiz-rgb-controls")) return;
-  const rgb = wizReadRgbBlock(card.querySelector(".wiz-rgb-controls"));
-  payload.r = rgb.r;
-  payload.g = rgb.g;
-  payload.b = rgb.b;
-}
-
-function wizSendRgbDebounced(mac, r, g, b, card) {
-  if (wizRgbDebounce[mac]) clearTimeout(wizRgbDebounce[mac]);
-  const payload = { mac: mac, on: true, r: r, g: g, b: b, dimming: wizCardDimming(card) };
-  wizOptimisticCard(card, payload);
-  wizRgbDebounce[mac] = setTimeout(() => {
-    delete wizRgbDebounce[mac];
-    wizSendCommand(payload, card);
-  }, WIZ_RGB_DEBOUNCE_MS);
-}
-
-function wizSendRgb(mac, r, g, b, card) {
-  if (wizRgbDebounce[mac]) {
-    clearTimeout(wizRgbDebounce[mac]);
-    delete wizRgbDebounce[mac];
-  }
-  const payload = { mac: mac, on: true, r: r, g: g, b: b, dimming: wizCardDimming(card) };
-  wizSendCommand(payload, card);
-}
-
-function wizSendTempDebounced(mac, temp, card) {
-  if (wizCctDebounce[mac]) clearTimeout(wizCctDebounce[mac]);
-  const payload = { mac: mac, on: true, temp: temp, dimming: wizCardDimming(card) };
-  wizCctDebounce[mac] = setTimeout(() => {
-    delete wizCctDebounce[mac];
-    wizSendCommand(payload, card);
-  }, WIZ_CCT_DEBOUNCE_MS);
-}
-
-function wizSendCommand(payload, card) {
-  wizOptimisticCard(card, payload);
-  return wizApi("/api/v2/wiz/command", "POST", payload)
-    .then(json => {
-      if (json && json.error) throw new Error(json.error);
-      setTimeout(() => wizRefreshLights(true), WIZ_CMD_REFRESH_MS);
-    })
-    .catch(err => {
-      wizSetStatus("Command failed: " + err, true);
-      setTimeout(() => wizRefreshLights(true), WIZ_CMD_REFRESH_MS);
-    });
-}
-
-function wizAllCommand(on) {
-  wizSendCommand({ all: true, on: on });
-}
-
-function wizStartPagePolling() {
-  if (wizPageTimer) clearInterval(wizPageTimer);
-  if (!wizShouldPoll()) return;
-  wizPageTimer = setInterval(() => wizRefreshLights(false), WIZ_PAGE_POLL_MS);
-}
-
-function wizStartPage() {
-  wizStopPolling();
-  wizInitLightGrid();
-  wizBindScanTable();
-  wizLoadConfig()
-    .then(() => wizRefreshLights())
-    .catch(err => wizSetStatus("Config load failed: " + err, true));
-  wizStartPagePolling();
-}
-
-function wizResumePage() {
-  if (activeTab !== "bWizLights") return;
-  wizRefreshLights();
-  wizStartPagePolling();
-}
-
 //entry point 
 window.onload=bootsTrapMain;
 
@@ -2357,7 +538,7 @@ function visibilityListener() {
 			clearInterval(tabTimer);  
 			PauseAPI=true;
 			objDAL?.pauseLiveStreams();
-			wizStopPolling();
+			if (typeof wizStopPolling === "function") wizStopPolling();
 			break;
     case "visible":
 			PauseAPI=false;
@@ -2380,11 +561,8 @@ window.addEventListener('popstate', function (event) {
 });
 
 window.addEventListener('hashchange', () => {
-  const hash = (location.hash || "").slice(1).split("?")[0];
-  if (!hash || hash === "Redirect" || hash === "UpdateStart" || hash === "Logout" || hash === "Updating") return;
-  const btn = document.getElementById("b" + hash);
-  activeTab = btn ? btn.id : ("b" + hash);
-  openTab();
+  console.log('Hash changed:', window.location.hash);
+  // Handle the hash change here
 });
 
 
@@ -2557,6 +735,12 @@ function updateDashboardControls() {
 		button.classList.toggle("active", Act_Watt);
 		button.textContent = Act_Watt ? "Watt" : "kW";
 	});
+	const dashboardPowerUnit = document.getElementById("dsh-power");
+	if (dashboardPowerUnit) dashboardPowerUnit.textContent = powerUnit();
+	const accuPowerLabel = document.getElementById("dash-accu-power-label");
+	if (accuPowerLabel) {
+		accuPowerLabel.textContent = t("lbl-today-kw").replace(/\[[^\]]+\]/, `[${powerUnit()}]`);
+	}
 	const dashTab = document.getElementById("DashTab");
 	if (dashTab) dashTab.classList.toggle("dashboard-editing", dashboardEditMode);
 }
@@ -2775,8 +959,9 @@ function UpdateAccu(){
 		trend_accu.data.datasets[0].data=[json.chargeLevel,100-json.chargeLevel];	
 		trend_accu.options.title.text = Number(json.chargeLevel).toLocaleString('nl-NL', {minimumFractionDigits: 0, maximumFractionDigits: 0} )+" %";
 		trend_accu.update();
-		document.getElementById('dash_accu_p').innerHTML = formatValue(json.currentPower);
-		document.getElementById('accu-status').innerHTML = json.status;
+		document.getElementById('dash_accu_p').innerHTML = formatPowerValue(json.currentPower);
+		const statusKey = `accu-status-${String(json.status || "idle").toLowerCase()}`;
+		document.getElementById('accu-status').innerHTML = t(statusKey);
 		setDashboardWidgetAvailable("dash_accu", true);
 	} else {
 		setDashboardWidgetAvailable("dash_accu", false);
@@ -2854,7 +1039,7 @@ function nrgm_getstatus(){
 
 function ProcessEIDClaim(json){
 	if ( "webhookUrl" in json ) {
-		document.getElementById('status').innerHTML = "<FONT COLOR='#70ac4d'>GEKOPPELD";
+		document.getElementById('status').innerHTML = "<FONT COLOR='#70ac4d'>" + t('eid-status-coupled');
 		document.getElementById('claim').style.display = 'none';
 	}	
 	if ( "claimUrl" in json ) {
@@ -2930,7 +1115,7 @@ function ProcessEIDPlanner(jsonData){
 }
 
 function getclaim(){
-	document.getElementById('status').innerHTML = "Status ophalen...";  	
+	document.getElementById('status').textContent = t('eid-status-loading');
 	objDAL.refreshEIDClaim();
 }
 
@@ -2938,11 +1123,15 @@ function getclaim(){
 
 function parseVersionManifest(json)
 {	
-	console.log("json.version:" + json.version + " firmwareVersion: "+ firmwareVersion);
-	if ( json.version != "" && firmwareVersion != "") {
-	  if ( firmwareVersion < (json.major*10000 + 100 * json.minor + json.fix) ) 
+	console.log("json.version:" + json.version + " firmwareVersion: "+ JSON.stringify(firmwareVersion));
+	if ( json.version != "" && firmwareVersion ) {
+	  const remote = parseOtaVersionParts(json.version, json.fork);
+	  if ( otaVersionIsNewer(remote, firmwareVersion) )
 		document.getElementById('message').innerHTML = "Software versie " + json.version + " beschikbaar";
 	  else document.getElementById('message').innerHTML = "";
+	}
+	if (objDAL?.devinfo && Object.keys(objDAL.devinfo).length) {
+	  renderDeviceInformation(objDAL.devinfo, json);
 	}
 }
 
@@ -3015,8 +1204,8 @@ function refreshDashboard(json){
 		v3 = meterValue(dash("voltage_l3"), 0);
 
 
-		const voltageCardAvailable = !(HeeftWater && EnableHist);
-		if ( voltageCardAvailable && v1 ) {
+		// A separate water sensor and the smart-meter voltage can coexist.
+		if (v1) {
 			setDashboardWidgetAvailable("l2", true);
 			document.getElementById("fases").innerHTML = Phases;
 			
@@ -3171,7 +1360,8 @@ function refreshDashboard(json){
 		}
 	
 	if ( SolarActive ) UpdateSolar();
-	if ( AccuActive ) UpdateAccu();
+	// Always check: a Victron battery can become available after the dashboard loaded.
+	UpdateAccu();
 	applyAllDashboardWidgetStates();
 
 }
@@ -3537,9 +1727,9 @@ function SendNetSwitchJson() {
     document.body.classList.remove("menu-open");
     clearInterval(tabTimer);  
     clearInterval(NRGStatusTimer);
-    heltyStopManagementPolling();
-    euromStopManagementPolling();
-    wizStopPolling();
+    if (typeof heltyStopManagementPolling === "function") heltyStopManagementPolling();
+    if (typeof euromStopManagementPolling === "function") euromStopManagementPolling();
+    if (typeof wizStopPolling === "function") wizStopPolling();
 	if (objDAL) {
 		objDAL.stopDashLivePolling();
 		objDAL.stopDashHistPolling();
@@ -3620,152 +1810,406 @@ function SendNetSwitchJson() {
   
 
 //============================================================================  
-  function FSExplorer() {
-	 let main = document.querySelector('main');
-	 let fileSize = document.querySelector('fileSize');
+  let fmFileCount = 0;
+  let fmFreeBytes = 0;
+  let fmFileNames = new Set();
+  let fmFileSizes = new Map();
 
-	 Spinner(true);
-	 fetch('api/listfiles', {"setTimeout": 5000}).then(function (response) {
-		 return response.json();
-	 }).then(function (json) {
-	
-	//clear previous content	 
-	 let list = document.getElementById("FSmain");
-	 while (list.hasChildNodes()) {  
-	   list.removeChild(list.firstChild);
-	 }
-    
-	 nFilecount = json.length - 1; //last object is general information
-	 const fileUrls = json.slice(0, -1).map(file => `/${encodeURIComponent(file.name.replace(/^\/+/, ''))}`);
-     let dir = '<table id="FSTable" width=90%>';
-	   for (var i = 0; i < json.length - 1; i++) {
-		 dir += "<tr>";
-		 dir += `<td width=250px nowrap><a href ="${json[i].name}" target="_blank">${json[i].name}</a></td>`;
-		 dir += `<td width=100px nowrap><small>${json[i].size}</small></td>`;
-		 dir += `<td width=100px nowrap><a href ="${json[i].name}"download="${json[i].name}"> Download </a></td>`;
-		 dir += `<td width=100px nowrap><a href ="${json[i].name}?delete=/${json[i].name}"> Delete </a></td>`;
-		 dir += "</tr>";
-	   }	// for ..
-	   main.insertAdjacentHTML('beforeend', dir);
-	   document.querySelectorAll('[href*=delete]').forEach((node) => {
-			 node.addEventListener('click', () => {
-					 if (!confirm('Delete, sure ?!')) event.preventDefault();  
-			 });
-	   });
-	   main.insertAdjacentHTML('beforeend', '</table>');
-       main.insertAdjacentHTML('beforeend',
-         `<div id="filecount">
-            <span>${t('lbl-fm-files')}: ${nFilecount}</span>
-            <a id="downloadAllFiles" href="#">Download all</a>
-          </div>`);
-       document.getElementById('downloadAllFiles').addEventListener('click', async event => {
-         event.preventDefault();
-         await downloadFilesSequential(fileUrls);
-       });
-	   main.insertAdjacentHTML('beforeend', `<p id="FSFree">${t('lbl-fm-storage')}: <b>${json[i].usedBytes} ${t('lbl-fm-used')}</b> | ${json[i].totalBytes} ${t('lbl-fm-total')}`);
-	   free = json[i].freeBytes;
-	   fileSize.innerHTML = "<b> &nbsp; </b><p>";    // spacer                
-	   Spinner(false);
-	 });	// function(json)
-	 
-    //view selected filesize
-	  document.getElementById('Ifile').addEventListener('change', () => {
-      //format filesize
-		  let nBytes = document.getElementById('Ifile').files[0].size;
-      let output = `${nBytes} Byte`;
-		  for (let aMultiples = [
-			 ' KB',
-			 ' MB'
-			], i = 0, nApprox = nBytes / 1024; nApprox > 1; nApprox /= 1024, i++) {
-			  output = nApprox.toFixed(2) + aMultiples[i];
-			}
-
-      let fUpload = true;
-      //check freespace
-			if (nBytes > free) {
-			  fileSize.innerHTML = `<p><small> File size: ${output}</small><strong style="color: red;"> not enough space! </strong><p>`;
-        fUpload = false;
-			}
-      //check filecount
-      //TODO: 
-      //  Although uploading a new file is blocked, REPLACING a file when the count is 30 must still be possible.
-      //  check if filename is already on the list, if so, allow this upload.
-			if ( nFilecount >= MAX_FILECOUNT) {
-			  fileSize.innerHTML = `<p><small> file size: ${output}</small><strong style="color: red;"> Max number of files (${MAX_FILECOUNT}) reached! </strong><p>`;
-        fUpload = false;
-			}
-      if( fUpload ){
-        fileSize.innerHTML = `<b>File size:</b> ${output}<p>`;
-			  document.getElementById('Iupload').removeAttribute('disabled');
-      }
-			else {			  
-        document.getElementById('Iupload').setAttribute('disabled', 'disabled');
-			}
-	 });	
+  function formattedSizeToBytes(value) {
+    const match = String(value || "").trim().match(/^([\d.,]+)\s*(B|KB|MB|GB|Byte)?$/i);
+    if (!match) return 0;
+    const amount = Number(match[1].replace(',', '.'));
+    const powers = { B: 0, BYTE: 0, KB: 1, MB: 2, GB: 3 };
+    return amount * Math.pow(1024, powers[(match[2] || 'B').toUpperCase()] || 0);
   }
 
+  function formatUploadSize(bytes) {
+    if (bytes < 1024) return `${bytes} Byte`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(2)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  }
+
+  function createFileAction(icon, label, href, extraClass = '') {
+    const action = document.createElement('a');
+    action.className = `fm-file-action ${extraClass}`.trim();
+    action.href = href;
+    action.title = label;
+    action.setAttribute('aria-label', label);
+    action.innerHTML = `<span class="iconify" data-icon="${icon}"></span>`;
+    return action;
+  }
+
+  function updateFileUploadState() {
+    const input = document.getElementById('Ifile');
+    const submit = document.getElementById('Iupload');
+    const status = document.getElementById('fmFileSize');
+    const file = input.files[0];
+
+    status.classList.remove('is-error');
+    submit.disabled = true;
+    if (!file) {
+      status.textContent = '';
+      return;
+    }
+
+    const size = formatUploadSize(file.size);
+    const normalizedName = file.name.replace(/^\/+/, '');
+    const replacesExistingFile = fmFileNames.has(normalizedName);
+    const availableBytes = fmFreeBytes + (fmFileSizes.get(normalizedName) || 0);
+    let error = '';
+
+    if (file.size > availableBytes) error = t('err-fm-no-space');
+    if (fmFileCount >= MAX_FILECOUNT && !replacesExistingFile) error = t('err-fm-max-files').replace('{count}', MAX_FILECOUNT);
+
+    if (error) {
+      status.classList.add('is-error');
+      status.textContent = `${t('lbl-fm-file-size')}: ${size} · ${error}`;
+      return;
+    }
+
+    status.textContent = `${t('lbl-fm-file-size')}: ${size}`;
+    submit.disabled = false;
+  }
+
+  function renderFileManager(files, stats) {
+    const main = document.getElementById('FSmain');
+    const fileUrls = files.map(file => `/${encodeURIComponent(file.name.replace(/^\/+/, ''))}`);
+    main.replaceChildren();
+
+    fmFileCount = files.length;
+    fmFreeBytes = formattedSizeToBytes(stats.freeBytes);
+    fmFileNames = new Set(files.map(file => file.name.replace(/^\/+/, '')));
+    fmFileSizes = new Map(files.map(file => [file.name.replace(/^\/+/, ''), formattedSizeToBytes(file.size)]));
+
+    document.getElementById('fmFileCount').textContent = `${fmFileCount} / ${MAX_FILECOUNT}`;
+    document.getElementById('fmStorageValue').textContent = `${stats.usedBytes} ${t('lbl-fm-used')}`;
+    document.getElementById('fmStorageMeta').textContent = `${stats.freeBytes} ${t('lbl-fm-free')} · ${stats.totalBytes} ${t('lbl-fm-total')}`;
+
+    const usedBytes = formattedSizeToBytes(stats.usedBytes);
+    const totalBytes = formattedSizeToBytes(stats.totalBytes);
+    const usedPercent = totalBytes ? Math.min(100, Math.max(0, (usedBytes / totalBytes) * 100)) : 0;
+    document.getElementById('fmStorageBar').style.width = `${usedPercent.toFixed(1)}%`;
+
+    if (!files.length) {
+      const empty = document.createElement('p');
+      empty.className = 'fm-empty';
+      empty.textContent = t('txt-fm-empty');
+      main.appendChild(empty);
+    } else {
+      const fileList = document.createElement('div');
+      fileList.className = 'fm-file-list';
+
+      files.forEach(file => {
+        const fileUrl = `/${encodeURIComponent(file.name.replace(/^\/+/, ''))}`;
+        const row = document.createElement('div');
+        row.className = 'fm-file-row';
+
+        const name = document.createElement('a');
+        name.className = 'fm-file-name';
+        name.href = fileUrl;
+        name.target = '_blank';
+        name.rel = 'noopener';
+        name.textContent = file.name;
+
+        const size = document.createElement('span');
+        size.className = 'fm-file-size';
+        size.textContent = file.size;
+
+        const actions = document.createElement('div');
+        actions.className = 'fm-file-actions';
+        const openAction = createFileAction('mdi-open-in-new', t('btn-fm-open'), fileUrl);
+        openAction.target = '_blank';
+        openAction.rel = 'noopener';
+        const downloadAction = createFileAction('mdi-download', t('btn-fm-download'), fileUrl);
+        downloadAction.download = file.name.replace(/^\/+/, '');
+        const deleteAction = createFileAction('mdi-delete-outline', t('btn-fm-delete'), `${fileUrl}?delete=/${encodeURIComponent(file.name.replace(/^\/+/, ''))}`, 'fm-file-delete');
+        deleteAction.addEventListener('click', event => {
+          if (!confirm(t('txt-fm-delete-confirm').replace('{name}', file.name))) event.preventDefault();
+        });
+        actions.append(openAction, downloadAction, deleteAction);
+        row.append(name, size, actions);
+        fileList.appendChild(row);
+      });
+      main.appendChild(fileList);
+    }
+
+    const downloadAll = document.getElementById('downloadAllFiles');
+    downloadAll.hidden = !files.length;
+    downloadAll.onclick = async event => {
+      event.preventDefault();
+      await downloadFilesSequential(fileUrls);
+    };
+
+    updateFileUploadState();
+  }
+
+  function FSExplorer() {
+    const main = document.getElementById('FSmain');
+    document.getElementById('Ifile').onchange = updateFileUploadState;
+
+    Spinner(true);
+    fetch('api/listfiles')
+      .then(response => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json();
+      })
+      .then(json => {
+        const stats = json[json.length - 1] || {};
+        renderFileManager(json.slice(0, -1), stats);
+      })
+      .catch(error => {
+        console.error('Unable to load file list:', error);
+        main.innerHTML = `<p class="fm-error">${t('err-fm-load')}</p>`;
+      })
+      .finally(() => Spinner(false));
+  }
+
+function deviceInfoValue(item) {
+  if (item && typeof item === "object") {
+    return `${item.value}${item.unit ? ` ${item.unit}` : ""}`;
+  }
+  return item ?? "-";
+}
+
+function addDeviceInfoRow(container, label, value, valueClass = "") {
+  if (!container || value === undefined || value === null || (value === "" && !valueClass)) return;
+  const row = document.createElement("div");
+  row.className = "sysinfo-row";
+  const labelNode = document.createElement("span");
+  labelNode.className = "sysinfo-label";
+  labelNode.textContent = label;
+  const valueNode = document.createElement("span");
+  valueNode.className = `sysinfo-value ${valueClass}`.trim();
+  valueNode.textContent = deviceInfoValue(value);
+  row.append(labelNode, valueNode);
+  container.appendChild(row);
+  return valueNode;
+}
+
+function addDeviceInfoPartsRow(container, label, parts) {
+  const usableParts = parts.filter(part => part !== undefined && part !== null && part !== "");
+  if (!container || !usableParts.length) return;
+  const valueNode = addDeviceInfoRow(container, label, "", "sysinfo-value-parts");
+  if (!valueNode) return;
+  usableParts.forEach(part => {
+    const partNode = document.createElement("span");
+    partNode.className = "sysinfo-value-part";
+    partNode.textContent = part;
+    valueNode.appendChild(partNode);
+  });
+}
+
+function addDeviceInfoSummary(container, label, value, meta = "") {
+  if (!container || value === undefined || value === null || value === "") return;
+  const card = document.createElement("div");
+  card.className = "sysinfo-summary";
+  const labelNode = document.createElement("span");
+  labelNode.className = "sysinfo-summary-label";
+  labelNode.textContent = label;
+  const valueNode = document.createElement("span");
+  valueNode.className = "sysinfo-summary-value";
+  valueNode.textContent = deviceInfoValue(value);
+  card.append(labelNode, valueNode);
+  if (meta) {
+    const metaNode = document.createElement("span");
+    metaNode.className = "sysinfo-summary-meta";
+    metaNode.textContent = meta;
+    card.appendChild(metaNode);
+  }
+  container.appendChild(card);
+}
+
+function deviceVersionNumber(version) {
+  const match = String(version || "").match(/v?(\d+)\.(\d+)\.(\d+)/i);
+  return match ? Number(match[1]) * 10000 + Number(match[2]) * 100 + Number(match[3]) : 0;
+}
+
+function deviceInfoNumber(value) {
+  const number = Number(value ?? 0);
+  const numberLocale = locale === "se" ? "sv-SE" : locale;
+  return Number.isFinite(number) ? number.toLocaleString(numberLocale) : String(value ?? 0);
+}
+
+function p1ProtocolLabel(obj) {
+  if (obj.meter_source === "HAN") return "HAN";
+  const mode = String(obj.p1_communication_mode || "");
+  if (mode.includes("9600")) return "DSMR 2/3";
+  if (mode.includes("115200")) return "DSMR 4/5";
+  return obj.meter_source || "P1";
+}
+
+function conciseP1Diagnostics(value) {
+  const raw = String(value || "");
+  const crcMode = raw.match(/CRC\s+(detecteren|actief|niet aanwezig)/i)?.[1]?.toLowerCase();
+  const skippedFields = raw.match(/velden overgeslagen\s+(\d+)/i)?.[1];
+  if (!crcMode && skippedFields === undefined) return raw.replace(/\s*·\s*fouten\s+\d+/i, "");
+
+  const crcKey = crcMode === "actief"
+    ? "sysinfo-crc-active"
+    : crcMode === "niet aanwezig"
+      ? "sysinfo-crc-absent"
+      : "sysinfo-crc-detecting";
+  const parts = crcMode ? [t(crcKey)] : [];
+  if (skippedFields !== undefined) parts.push(`${t("sysinfo-fields-skipped")} ${skippedFields}`);
+  return parts.join(" · ");
+}
+
+function mqttStatusLabel(status) {
+  switch (String(status || "").toLowerCase()) {
+    case "yes": return t("sysinfo-connected");
+    case "no": return t("sysinfo-disconnected");
+    case "off": return t("sysinfo-disabled");
+    default: return status || "-";
+  }
+}
+
+function addFirmwareUpdateAction(valueNode, channel) {
+  if (!valueNode) return;
+  const link = document.createElement("a");
+  link.className = "sysinfo-update-action";
+  link.href = "#";
+  link.textContent = t("sysinfo-update-action");
+  link.onclick = () => { startUpdateFlow(channel); return false; };
+  valueNode.appendChild(link);
+}
+
+function renderDeviceInformation(obj, manifest) {
+  const containers = {
+    overview: document.getElementById("sysinfo_overview"),
+    update: document.getElementById("sysinfo_update_rows"),
+    smartMeter: document.getElementById("sysinfo_smart_meter"),
+    network: document.getElementById("sysinfo_network"),
+    hardware: document.getElementById("sysinfo_hardware"),
+    status: document.getElementById("sysinfo_status"),
+    connections: document.getElementById("sysinfo_connections"),
+    technical: document.getElementById("sysinfo_technical_rows")
+  };
+  Object.values(containers).forEach(container => { if (container) container.innerHTML = ""; });
+
+  const shortFirmware = String(obj.fwversion || "-").split(" ( ")[0];
+  const telegramCount = Number(obj.telegramcount || 0);
+  const telegramErrors = Number(obj.telegramerrors || 0);
+  const meterDetected = telegramCount > 0;
+  const meterStatus = meterDetected ? t("sysinfo-detected") : t("sysinfo-not-detected");
+  const meterMeta = meterDetected
+    ? `${p1ProtocolLabel(obj)} · ${deviceInfoNumber(telegramCount)} ${t("sysinfo-read")}`
+    : p1ProtocolLabel(obj);
+  const networkMeta = [obj.ssid, obj.ipaddress].filter(Boolean).join(" · ");
+  const installedVersion = parseOtaVersionParts(obj.fwversion);
+  const latestVersion = manifest.version ? parseOtaVersionParts(manifest.version, manifest.fork) : null;
+  const hasFirmwareUpdate = !!(latestVersion && otaVersionIsNewer(latestVersion, installedVersion));
+  const firmwareStatus = !latestVersion
+    ? t("sysinfo-checking-update")
+    : hasFirmwareUpdate ? t("sysinfo-update-available") : t("sysinfo-current");
+  addDeviceInfoSummary(containers.overview, t("setting-smart-meter"), meterStatus, meterMeta);
+  addDeviceInfoSummary(containers.overview, t("sysinfo-network"), obj.network, networkMeta);
+  addDeviceInfoSummary(containers.overview, t("sysinfo-firmware"), shortFirmware, firmwareStatus);
+  addDeviceInfoSummary(containers.overview, t("sysinfo-hardware"), obj.hardware);
+  addDeviceInfoSummary(containers.overview, td("uptime"), obj.uptime);
+
+  addDeviceInfoRow(containers.update, td("fwversion"), obj.fwversion);
+  if (manifest.version) {
+    const stableValue = addDeviceInfoRow(containers.update, t("lbl-latest-fwversion"), manifest.version);
+    addFirmwareUpdateAction(stableValue, "stable");
+  }
+  if (manifest.beta) {
+    const betaValue = addDeviceInfoRow(containers.update, t("lbl-beta-fwversion"), manifest.beta);
+    addFirmwareUpdateAction(betaValue, "beta");
+  }
+  const updateCard = document.getElementById("sysinfo_update");
+  updateCard?.classList.toggle("has-update", hasFirmwareUpdate);
+  updateCard?.classList.toggle("is-current", !!(latestVersion && !hasFirmwareUpdate));
+
+  ["meter_source", "p1_communication_mode"].forEach(key =>
+    addDeviceInfoRow(containers.smartMeter, td(key), obj[key]));
+  addDeviceInfoPartsRow(containers.smartMeter, td("p1_diagnostics"), conciseP1Diagnostics(obj.p1_diagnostics).split("·").map(part => part.trim()));
+  if (obj.telegramcount !== undefined || obj.telegramerrors !== undefined) {
+    addDeviceInfoRow(
+      containers.smartMeter,
+      t("sysinfo-telegrams-breakdown"),
+      `${deviceInfoNumber(telegramCount)} / ${deviceInfoNumber(telegramErrors)}`,
+      "sysinfo-value-part"
+    );
+  }
+
+  const connection = [obj.network, obj.ssid, obj.wifirssi !== undefined ? `${obj.wifirssi} dBm` : ""].filter(Boolean).join(" · ");
+  addDeviceInfoRow(containers.network, td("network"), connection);
+  ["hostname", "ipaddress", "macaddress"].forEach(key => addDeviceInfoRow(containers.network, td(key), obj[key]));
+
+  ["hardware", "chipid", "cpufreq", "freeheap"].forEach(key => addDeviceInfoRow(containers.hardware, td(key), obj[key]));
+  const flashSizeKb = obj.flashchipsize?.value !== undefined ? Number(obj.flashchipsize.value) * 1024 : undefined;
+  const storageValues = [flashSizeKb, obj.sketchsize?.value, obj.FSsize?.value];
+  if (storageValues.every(value => value !== undefined)) {
+    addDeviceInfoRow(
+      containers.hardware,
+      t("sysinfo-storage-breakdown"),
+      `${storageValues.join(" / ")} kB`,
+      "sysinfo-value-part"
+    );
+  }
+
+  ["uptime", "reboots", "lastreset"].forEach(key => addDeviceInfoRow(containers.status, td(key), obj[key]));
+
+  if (obj.mqttbroker !== undefined || obj.mqttbroker_connected !== undefined) {
+    const mqtt = [
+      obj.mqttbroker,
+      mqttStatusLabel(obj.mqttbroker_connected),
+      obj.mqttinterval !== undefined ? `${obj.mqttinterval} s` : ""
+    ].filter(Boolean).join(" | ");
+    addDeviceInfoRow(containers.connections, t("sysinfo-mqtt-breakdown"), mqtt, "sysinfo-value-part");
+  }
+  if (obj.meent_webid_status !== undefined || obj.meent_api_key_status !== undefined || obj.meent_data_status !== undefined) {
+    const meentLastSuccess = Number(obj.meent_last_success || 0);
+    // DSMR timestamps are local meter time. The firmware's epoch representation
+    // deliberately has no timezone offset, so render it as UTC to prevent the
+    // browser from applying the local offset a second time.
+    const meentLastSuccessText = meentLastSuccess
+      ? new Date(meentLastSuccess * 1000).toLocaleString(undefined, { timeZone: "UTC" })
+      : "";
+    const meentData = obj.meent_data_status === undefined ? "" :
+      `${obj.meent_data_status}${meentLastSuccessText ? ` (${meentLastSuccessText})` : ""}`;
+    const meent = [
+      obj.meent_webid_status !== undefined ? `WebID: ${obj.meent_webid_status}` : "",
+      obj.meent_api_key_status !== undefined ? `API-key: ${obj.meent_api_key_status}` : "",
+      meentData ? `Data: ${meentData}` : ""
+    ].filter(Boolean).join(" | ");
+    // Kept literal: language files are fetched from the CDN and older cached
+    // files do not know this recently added key.
+    addDeviceInfoRow(containers.connections, "MEENT", meent, "sysinfo-value-part");
+  }
+  ["eid_status", "paired"].forEach(key => addDeviceInfoRow(containers.connections, td(key), obj[key]));
+  document.getElementById("sysinfo_connections_card")?.toggleAttribute("hidden", !containers.connections?.children.length);
+
+  const groupedKeys = new Set([
+    "fwversion", "hardware", "meter_source", "p1_communication_mode", "smart_meter_version", "p1_diagnostics",
+    "telegramcount", "telegramerrors", "network", "ssid", "wifirssi", "hostname", "ipaddress", "macaddress",
+    "chipid", "cpufreq", "freeheap", "flashchipsize", "sketchsize", "freesketchspace", "FSsize", "uptime",
+    "reboots", "lastreset", "mqttbroker", "mqttbroker_connected", "mqttinterval", "meent_webid_status", "meent_api_key_status", "meent_data_status", "meent_last_success", "eid_status", "paired"
+  ]);
+  ["coreversion", "sdkversion", "compileoptions", "indexfile"].forEach(key =>
+    addDeviceInfoRow(containers.technical, td(key), obj[key]));
+  Object.keys(obj).filter(key => !groupedKeys.has(key) && !["coreversion", "sdkversion", "compileoptions", "indexfile"].includes(key))
+    .forEach(key => addDeviceInfoRow(containers.technical, td(key), obj[key]));
+}
+
 function parseDeviceInfo(obj) {
-  const tableRef = document.getElementById('tb_info');
-  tableRef.innerHTML = ""; // clear table
   console.log("dev info compileoptions:", obj.compileoptions);
 
   // NETSW config
-  const showNetSw = obj.compileoptions.includes("[NETSW]");
+  const showNetSw = String(obj.compileoptions || "").includes("[NETSW]");
   document.getElementById("bNETSW").style.display = showNetSw ? "block" : "none";
   updateSystemActionMenu(obj);
-    
-  // add version info 
+
   const manifest = objDAL.version_manifest;
-  if (manifest.version) {
-    const row = tableRef.insertRow(-1);
-    row.insertCell(0).innerHTML = t("lbl-latest-fwversion");
-    row.insertCell(1).innerHTML = manifest.version;
-    row.insertCell(2).innerHTML = `<a style='color:red' onclick='startUpdateFlow("stable")' href='#'>${t('lbl-install')}</a>`;
-    console.log("last version:", manifest.major * 10000 + manifest.minor * 100);
-  }
-  
-    if (manifest.beta) {
-    const row = tableRef.insertRow(-1);
-    row.insertCell(0).innerHTML = t("lbl-beta-fwversion");
-    row.insertCell(1).innerHTML = manifest.beta;
-    row.insertCell(2).innerHTML = `<a style='color:red' onclick='startUpdateFlow("beta")' href='#'>${t('lbl-install')}</a>`;
-  }
-
-  // add dev info
-  for (let k in obj) {
-    if (k === "meter_source") Meter_Source = obj[k];
-
-    const row = tableRef.insertRow(-1);
-    row.insertCell(0).innerHTML = td(k);
-
-    if (typeof obj[k] === "object") {
-      row.insertCell(1).innerHTML = obj[k].value;
-      row.insertCell(2).innerHTML = obj[k].unit;
-      row.cells[1].style.textAlign = "right";
-    } else {
-      row.insertCell(1).innerHTML = obj[k];
-      row.insertCell(2);
-    }
-
-    if (k === "fwversion") {
-      devVersion = obj[k];
-      console.log("fwversion:", devVersion);
-    }
-  }
+  Meter_Source = obj.meter_source || Meter_Source;
+  devVersion = obj.fwversion || "-";
+  renderDeviceInformation(obj, manifest);
 
   // firmware parsing
   document.getElementById('devVersion').innerHTML = devVersion;
   firmwareVersion_dspl = devVersion;
-  let tmpFW = devVersion.replace("+", " ").replace("v", "");
-  const tmpX = tmpFW.split(" ")[0];
-  const [maj, min, fix] = tmpX.split(".").map(Number);
-  const firmwareVersion = maj * 10000 + min * 100 + fix;
-  console.log("tmpFW:", tmpFW);
-
-  // check for update
-  if (manifest.version) {
-    const latest = manifest.major * 10000 + manifest.minor * 100 + manifest.fix;
-  }
+  firmwareVersion = parseOtaVersionParts(devVersion);
+  console.log("firmwareVersion:", firmwareVersion);
 
   if (!esphomeManifestRequested || !Object.keys(objDAL?.getESPHomeManifest?.()?.targets || {}).length) {
     esphomeManifestRequested = true;
@@ -4401,10 +2845,10 @@ function formatFailureLog(svalue) {
 		data.data[i].MM   = parseInt(data.data[i].date.substring(2,4));
         
         //simple differences
-        data.data[i].p_edt1= (data.data[i].values[0] - data.data[slotbefore].values[0]);
-        data.data[i].p_edt2= (data.data[i].values[1] - data.data[slotbefore].values[1]);
-        data.data[i].p_ert1= (data.data[i].values[2] - data.data[slotbefore].values[2]);
-        data.data[i].p_ert2= (data.data[i].values[3] - data.data[slotbefore].values[3]);
+        data.data[i].p_edt1= (data.data[i].values[0] - data.data[slotbefore].values[0]) * MeterEnergyFactor;
+        data.data[i].p_edt2= (data.data[i].values[1] - data.data[slotbefore].values[1]) * MeterEnergyFactor;
+        data.data[i].p_ert1= (data.data[i].values[2] - data.data[slotbefore].values[2]) * MeterEnergyFactor;
+        data.data[i].p_ert2= (data.data[i].values[3] - data.data[slotbefore].values[3]) * MeterEnergyFactor;
 		data.data[i].p_gd  = (data.data[i].values[4] - data.data[slotbefore].values[4]);
         data.data[i].water = (data.data[i].values[5] - data.data[slotbefore].values[5]);
         data.data[i].solar = (data.data[i].values.length > 6) ? Number(data.data[i].values[6]) : -1;
@@ -4435,10 +2879,10 @@ function formatFailureLog(svalue) {
       else
       {
         costs = 0;
-        data.data[i].p_edt1    = data.data[i].values[0];
-        data.data[i].p_edt2    = data.data[i].values[1];
-        data.data[i].p_ert1    = data.data[i].values[2];        
-        data.data[i].p_ert2    = data.data[i].values[3];        
+        data.data[i].p_edt1    = data.data[i].values[0] * MeterEnergyFactor;
+        data.data[i].p_edt2    = data.data[i].values[1] * MeterEnergyFactor;
+        data.data[i].p_ert1    = data.data[i].values[2] * MeterEnergyFactor;
+        data.data[i].p_ert2    = data.data[i].values[3] * MeterEnergyFactor;
         data.data[i].p_gd      = data.data[i].values[4];
 		data.data[i].water     = data.data[i].values[5];
         data.data[i].solar     = (data.data[i].values.length > 6) ? Number(data.data[i].values[6]) : -1;
@@ -4503,8 +2947,8 @@ function refreshHistData(type) {
 				let values = data.data[tempslot].values;
 				hist_arrG[i] = values[4];
 				hist_arrW[i] = values[5];
-				hist_arrPa[i] = values[0] + values[1];
-				hist_arrPi[i] = values[2] + values[3];
+				hist_arrPa[i] = (values[0] + values[1]) * MeterEnergyFactor;
+				hist_arrPi[i] = (values[2] + values[3]) * MeterEnergyFactor;
 				}
 				DailyHistoryReady = true;
 				if (activeTab === "bDashTab" && objDAL.getDashLive()?.timestamp) {
@@ -4963,12 +3407,17 @@ function formatValue(value)
         "er_tariff1" in json ? er_tariff1 = json.er_tariff1.value : er_tariff1 = 0;
         "er_tariff2" in json ? er_tariff2 = json.er_tariff2.value : er_tariff2 = 0;
         "gd_tariff" in json ? gd_tariff = json.gd_tariff.value : gd_tariff = 0;
+		const ctFactor = Number(json.ct_factor?.value ?? 1);
+		const vtFactor = Number(json.vt_factor?.value ?? 1);
+		MeterEnergyFactor = Number.isInteger(ctFactor) && ctFactor > 0 && Number.isInteger(vtFactor) && vtFactor > 0
+			? ctFactor * vtFactor
+			: 1;
 	  	"conf" in json ? Dongle_Config = json.conf : Dongle_Config = "";
         "electr_netw_costs" in json ? electr_netw_costs = json.electr_netw_costs.value : electr_netw_costs = 0;
         "eid-enabled" in json ? eid_enabled = json["eid-enabled"]: eid_enabled = false;
         "dev-pairing" in json ? pairing_enabled = json["dev-pairing"]: pairing_enabled = false;
         "eid-planner" in json ? eid_planner_enabled = json["eid-planner"]: eid_planner_enabled = false;
-        "ota_url" in json ? ota_url = json.ota_url.value: ota_url = "ota.smart-stuff.nl/v5/";
+        ota_url = ("ota_url" in json && json.ota_url.value) ? json.ota_url.value : "";
         HeeftWater = settingsWaterEnabled(json);
         AMPS = asNumber(json.fuse?.value);
         if (Number.isNaN(AMPS)) AMPS = 25;
@@ -5093,7 +3542,7 @@ function initSettingsSubTabsOnce() {
       const pane = document.getElementById(targetId);
       if (pane) pane.classList.add("active");
       if (targetId === "settings_modbus") refreshModbusMonitorView();
-      if (targetId === "settings_mqtt") refreshMqttMonitorView();
+      if (targetId === "settings_tapelectric") refreshTapMonitorView();
     });
   });
 }
@@ -5104,10 +3553,11 @@ function splitSettingsUI() {
   const smartMeter = document.getElementById("settings_smart_meter");
   const tariff  = document.getElementById("settings_tariff");
   const mqtt    = document.getElementById("settings_mqtt");
+  const meent   = document.getElementById("settings_meent");
   const modbus  = document.getElementById("settings_modbus");
   const tapelectric = document.getElementById("settings_tapelectric");
 
-  if ( !table || !general || !smartMeter || !mqtt || !modbus || !tariff || !tapelectric ) return;
+  if ( !table || !general || !smartMeter || !mqtt || !meent || !modbus || !tariff || !tapelectric ) return;
 
   // velden op basis van "i" (dus zonder "settingR_")
   const MQTT_KEYS = new Set([
@@ -5115,6 +3565,7 @@ function splitSettingsUI() {
     "mqtt_helty",
     "mqtt_eurom",
     "mqtt_wiz",
+    "mqtt_monitor",
     "mqtt_tls",
     "mqtt_broker",
     "mqtt_broker_port",
@@ -5154,6 +3605,9 @@ function splitSettingsUI() {
     "mb_map",
     "mb_id",
     "mb_port",
+    "victron_accu_enabled",
+    "victron_accu_ip",
+    "victron_accu_id",
     "mb_parity",
     "mb_baud",
     "mb_bits",
@@ -5165,6 +3619,7 @@ function splitSettingsUI() {
     "modbus_bits",
     "modbus_stop"
   ]);
+  const MEENT_KEYS = new Set(["meent_webid", "meent_api_key", "meent_interval"]);
 
   const TAP_KEYS = new Set([
     "tap-enabled",
@@ -5182,6 +3637,7 @@ function splitSettingsUI() {
     const key = id.startsWith("settingR_") ? id.substring("settingR_".length) : "";
 
     if (MQTT_KEYS.has(key)) mqtt.appendChild(row);
+    else if (MEENT_KEYS.has(key)) meent.appendChild(row);
     else if (SMART_METER_KEY_SET.has(key)) smartMeter.appendChild(row);
     else if (TARIFF_KEYS.has(key)) tariff.appendChild(row);
     else if (MODBUS_KEYS.has(key)) modbus.appendChild(row);
@@ -5194,6 +3650,18 @@ function splitSettingsUI() {
     if (row) smartMeter.appendChild(row);
   });
 
+  // The HTML shell is shared by all firmware variants. Only POST_MEENT builds
+  // expose MEENT settings through the API, so hide the otherwise empty tab.
+  const hasMeentSettings = Array.from(MEENT_KEYS).some(key => document.getElementById(`settingR_${key}`));
+  const meentTabButton = document.querySelector('#settings_subtabs [data-target="settings_meent"]');
+  if (meentTabButton) meentTabButton.style.display = hasMeentSettings ? "" : "none";
+  if (!hasMeentSettings) {
+    meent.classList.remove("active");
+    const generalTabButton = document.querySelector('#settings_subtabs [data-target="settings_general"]');
+    const generalPane = document.getElementById("settings_general");
+    if (generalTabButton && generalTabButton.classList.contains("active")) generalPane?.classList.add("active");
+  }
+
   const mqttToggleRow = document.getElementById("settingR_mqtt_enabled");
   if (mqttToggleRow) mqtt.prepend(mqttToggleRow);
   const mqttMonitorCard = document.getElementById("mqtt_monitor_card");
@@ -5204,8 +3672,11 @@ function splitSettingsUI() {
   if (modbusMonitorCard) modbus.appendChild(modbusMonitorCard);
   const tapToggleRow = document.getElementById("settingR_tap-enabled");
   if (tapToggleRow) tapelectric.prepend(tapToggleRow);
+  const tapMonitorCard = document.getElementById("tap_monitor_card");
+  if (tapMonitorCard) tapelectric.appendChild(tapMonitorCard);
   updateMQTTSettingsVisibility();
   updateTapSettingsVisibility();
+  updateVictronSettingsVisibility();
 }
 
 function updateMQTTSettingsVisibility() {
@@ -5221,7 +3692,7 @@ function updateMQTTSettingsVisibility() {
 
   const monitorCard = document.getElementById("mqtt_monitor_card");
   if (monitorCard && !showMQTTFields) monitorCard.style.display = "none";
-  else if (showMQTTFields) refreshMqttMonitorView();
+  else if (showMQTTFields && typeof refreshMqttMonitorView === "function") refreshMqttMonitorView();
 }
 
 function updateTapSettingsVisibility() {
@@ -5233,6 +3704,17 @@ function updateTapSettingsVisibility() {
   tapPane.querySelectorAll(".settingDiv").forEach(row => {
     if (row.id === "settingR_tap-enabled") return;
     row.style.display = showTapFields ? "" : "none";
+  });
+}
+
+function updateVictronSettingsVisibility() {
+  const victronEnabled = document.getElementById("setFld_victron_accu_enabled");
+  if (!victronEnabled) return;
+
+  const showVictronFields = victronEnabled.checked;
+  ["victron_accu_ip", "victron_accu_id"].forEach(key => {
+    const row = document.getElementById(`settingR_${key}`);
+    if (row) row.style.display = showVictronFields ? "" : "none";
   });
 }
 
@@ -5373,22 +3855,23 @@ function initModbusMonitorControls() {
   }
 }
 
-function getMqttMonitorSetting() {
-  return objDAL?.dev_settings?.mqtt_monitor;
-}
-
-function getMqttMonitorEnabled() {
-  const setting = getMqttMonitorSetting();
+function getTapMonitorEnabled() {
+  const setting = objDAL?.dev_settings?.tap_monitor;
   if (typeof setting === "boolean") return setting;
   if (setting && typeof setting === "object" && "value" in setting) return !!setting.value;
   return null;
 }
 
-function renderMqttMonitorData(json) {
-  const body = document.getElementById("mqtt_monitor_body");
-  const empty = document.getElementById("mqtt_monitor_empty");
-  const wrap = document.getElementById("mqtt_monitor_table_wrap");
-  const tbody = document.querySelector("#mqtt_monitor_table tbody");
+function formatTapMonitorStatus(status) {
+  if (status === -1) return t("tap-monitor-status-failed");
+  return status;
+}
+
+function renderTapMonitorData(json) {
+  const body = document.getElementById("tap_monitor_body");
+  const empty = document.getElementById("tap_monitor_empty");
+  const wrap = document.getElementById("tap_monitor_table_wrap");
+  const tbody = document.querySelector("#tap_monitor_table tbody");
   if (!body || !empty || !wrap || !tbody) return;
 
   if (!json?.enabled) {
@@ -5414,13 +3897,10 @@ function renderMqttMonitorData(json) {
 
   rows.forEach(row => {
     const tr = document.createElement("tr");
-    const rawTime = row.time ?? row.timestamp;
     [
-      rawTime ? formatTimestamp(rawTime) : "-",
-      row.system ?? "-",
-      row.dir ?? "-",
-      row.topic ?? "-",
-      row.result ?? "-"
+      row.timestamp ? formatTimestamp(row.timestamp) : "-",
+      row.body ?? "-",
+      formatTapMonitorStatus(row.status)
     ].forEach(value => {
       const cell = document.createElement("td");
       cell.textContent = value;
@@ -5430,48 +3910,47 @@ function renderMqttMonitorData(json) {
   });
 }
 
-function refreshMqttMonitorData() {
-  const enabled = getMqttMonitorEnabled();
+function refreshTapMonitorData() {
+  const enabled = getTapMonitorEnabled();
   if (!enabled) {
-    renderMqttMonitorData({ enabled: false, data: [] });
+    renderTapMonitorData({ enabled: false, data: [] });
     return;
   }
 
-  fetch("/api/v2/mqtt/monitor")
+  fetch("/api/v2/tapelectric/monitor")
     .then(response => response.json())
-    .then(json => renderMqttMonitorData(json))
-    .catch(error => console.error("refreshMqttMonitorData()", error));
+    .then(json => renderTapMonitorData(json))
+    .catch(error => console.error("refreshTapMonitorData()", error));
 }
 
-function refreshMqttMonitorView() {
-  const card = document.getElementById("mqtt_monitor_card");
-  const toggle = document.getElementById("mqtt_monitor_toggle");
-  const mqttEnabled = document.getElementById("setFld_mqtt_enabled");
-  const enabled = getMqttMonitorEnabled();
+function refreshTapMonitorView() {
+  const card = document.getElementById("tap_monitor_card");
+  const toggle = document.getElementById("tap_monitor_toggle");
+  const enabled = getTapMonitorEnabled();
   if (!card || !toggle) return;
 
-  if (enabled === null || (mqttEnabled && !mqttEnabled.checked)) {
+  if (enabled === null) {
     card.style.display = "none";
     return;
   }
 
   card.style.display = "";
   toggle.checked = enabled;
-  renderMqttMonitorData({ enabled, data: [] });
-  if (enabled) refreshMqttMonitorData();
+  renderTapMonitorData({ enabled, data: [] });
+  if (enabled) refreshTapMonitorData();
 }
 
-function initMqttMonitorControls() {
-  const toggle = document.getElementById("mqtt_monitor_toggle");
-  const refreshBtn = document.getElementById("mqtt_monitor_refresh");
-  const clearBtn = document.getElementById("mqtt_monitor_clear");
+function initTapMonitorControls() {
+  const toggle = document.getElementById("tap_monitor_toggle");
+  const refreshBtn = document.getElementById("tap_monitor_refresh");
+  const clearBtn = document.getElementById("tap_monitor_clear");
 
   if (toggle && !toggle.dataset.bound) {
     toggle.dataset.bound = "1";
     toggle.addEventListener("change", () => {
-      sendPostSetting("mqtt_monitor", toggle.checked);
-      if (objDAL?.dev_settings) objDAL.dev_settings.mqtt_monitor = toggle.checked;
-      refreshMqttMonitorView();
+      sendPostSetting("tap_monitor", toggle.checked);
+      if (objDAL?.dev_settings) objDAL.dev_settings.tap_monitor = toggle.checked;
+      refreshTapMonitorView();
     });
   }
 
@@ -5479,7 +3958,7 @@ function initMqttMonitorControls() {
     refreshBtn.dataset.bound = "1";
     refreshBtn.addEventListener("click", event => {
       event.preventDefault();
-      refreshMqttMonitorData();
+      refreshTapMonitorData();
     });
   }
 
@@ -5487,9 +3966,9 @@ function initMqttMonitorControls() {
     clearBtn.dataset.bound = "1";
     clearBtn.addEventListener("click", event => {
       event.preventDefault();
-      fetch("/api/v2/mqtt/monitor", { method: "POST" })
-        .then(() => refreshMqttMonitorData())
-        .catch(error => console.error("clear mqtt monitor", error));
+      fetch("/api/v2/tapelectric/monitor", { method: "POST" })
+        .then(() => refreshTapMonitorData())
+        .catch(error => console.error("clear tap monitor", error));
     });
   }
 }
@@ -5504,6 +3983,7 @@ function initMqttMonitorControls() {
 	{
 	  if ( i == "conf") continue;
 	  if ( i == "mb_monitor" || i == "mqtt_monitor") continue;
+	  if ( i == "tap_monitor") continue;
 	  console.log("["+i+"]=>["+data[i].value+"]");
 	  let settings = document.getElementById('settings_table');
 	  if( ( document.getElementById("settingR_"+i)) == null )
@@ -5516,10 +3996,7 @@ function initMqttMonitorControls() {
 		  let fldDiv = document.createElement("div");
 			  if ( (i == "gd_tariff") && (Dongle_Config == "p1-q") ) fldDiv.textContent = "Warmte tarief (GJ)";
 			  else if ( i == "gas_netw_costs") fldDiv.textContent = "Netwerkkosten Gas/maand";
-			  else {
-			    fldDiv.setAttribute("data-i18n-key", "dict_" + i);
-			    fldDiv.textContent = td(i);
-			  }
+			  else fldDiv.textContent = td(i);
 			  rowDiv.appendChild(fldDiv);
 		//--- input ---
 		  let inputDiv = document.createElement("div");
@@ -5543,6 +4020,7 @@ function initMqttMonitorControls() {
 				{ v: 8, t: "KLEFR / INEPRO / Webasto Unite" },
 				{ v: 9, t: "Phoenix Contact EEM-XM3xx" },
 				{ v: 15, t: "Fronius SunSpec 203" },
+				{ v: 16, t: "EM24-TCP" },
 			  ];
 			
 			  const sel = document.createElement("select");
@@ -5602,6 +4080,43 @@ function initMqttMonitorControls() {
 				if (o.v === cur) opt.selected = true;
 				sel.appendChild(opt);
 			  });
+
+			  sInput = sel;
+			}
+			else if (i === "time_zone") {
+			  const TIMEZONES = [
+				{ v: "CET-1CEST,M3.5.0,M10.5.0/3", t: "Europe/Amsterdam (CET/CEST)" },
+				{ v: "GMT0BST,M3.5.0/1,M10.5.0", t: "Europe/London (GMT/BST)" },
+				{ v: "CET-1CEST,M3.5.0,M10.5.0/3", t: "Europe/Berlin" },
+				{ v: "CET-1CEST,M3.5.0,M10.5.0/3", t: "Europe/Warsaw" },
+				{ v: "CET-1CEST,M3.5.0,M10.5.0/3", t: "Europe/Stockholm" },
+				{ v: "UTC0", t: "UTC" }
+			  ];
+
+			  const sel = document.createElement("select");
+			  sel.setAttribute("id", fldId);
+
+			  const cur = data[i].value ?? "CET-1CEST,M3.5.0,M10.5.0/3";
+			  let matched = false;
+
+			  TIMEZONES.forEach(o => {
+				const opt = document.createElement("option");
+				opt.value = o.v;
+				opt.textContent = o.t;
+				if (o.v === cur) {
+				  opt.selected = true;
+				  matched = true;
+				}
+				sel.appendChild(opt);
+			  });
+
+			  if (!matched && cur) {
+				const opt = document.createElement("option");
+				opt.value = cur;
+				opt.textContent = cur + " (custom)";
+				opt.selected = true;
+				sel.appendChild(opt);
+			  }
 
 			  sInput = sel;
 			}
@@ -5693,7 +4208,7 @@ function initMqttMonitorControls() {
 			  else {
 				switch (data[i].type) {
 				  case "s":
-					sInput.setAttribute("type", "text");
+				sInput.setAttribute("type", i === "meent_api_key" ? "password" : "text");
 					sInput.setAttribute("maxlength", data[i].max);
 					sInput.setAttribute("placeholder", "<max " + data[i].max + ">");
 					break;
@@ -5723,6 +4238,9 @@ function initMqttMonitorControls() {
 			if (i === "tap-enabled") {
 			  sInput.addEventListener("change", updateTapSettingsVisibility);
 			}
+			if (i === "victron_accu_enabled") {
+			  sInput.addEventListener("change", updateVictronSettingsVisibility);
+			}
 			
 			inputDiv.appendChild(sInput);
 
@@ -5746,8 +4264,10 @@ function initMqttMonitorControls() {
   updateBrowserSettingsControls();
   initModbusMonitorControls();
   refreshModbusMonitorView();
-  initMqttMonitorControls();
-  refreshMqttMonitorView();
+  if (typeof initMqttMonitorControls === "function") initMqttMonitorControls();
+  if (typeof refreshMqttMonitorView === "function") refreshMqttMonitorView();
+  initTapMonitorControls();
+  refreshTapMonitorView();
 
       
   } // refreshSettings()
@@ -6462,7 +4982,8 @@ function handle_menu_click()
 			this.classList.add("active");
 
 			activeTab = this.id;
-			openTab();
+			//console.log("ActiveID - " + activeTab );
+// 			openTab();  		
   		});
 	}
 }
@@ -6472,10 +4993,9 @@ function handle_menu_click()
 let translations = {};
 const FALLBACK_TRANSLATIONS = {
   nl: {
-    "dict_mqtt_helty": "MQTT Air Guard",
-    "dict_mqtt_eurom": "MQTT EUROM",
-    "dict_mqtt_wiz": "MQTT WiZ",
-    "dict_mqtt_monitor": "MQTT monitor",
+    "accu-status-idle": "Inactief",
+    "accu-status-charging": "Laden",
+    "accu-status-discharging": "Ontladen",
     "net-action-on": "Schakelactie",
     "net-action-off": "Terugschakelactie",
     "net-direction": "Reageer op",
@@ -6493,78 +5013,12 @@ const FALLBACK_TRANSLATIONS = {
     "lbl-history-order-new-to-old-short": "nieuw→oud",
     "lbl-history-order-old-to-new-short": "oud→nieuw",
     "tip-history-graph-new-to-old": "X-as: nieuw naar oud. Klik voor oud naar nieuw.",
-    "tip-history-graph-old-to-new": "X-as: oud naar nieuw. Klik voor nieuw naar oud.",
-    "helty-status-online": "Online",
-    "helty-status-offline": "Offline",
-    "helty-status-stale": "Verouderde gegevens",
-    "helty-status-hub-disabled": "Hub uitgeschakeld",
-    "helty-btn-refresh": "Vernieuwen",
-    "helty-tx-fan-mode": "Ventilatorstand",
-    "helty-tx-indoor-temp": "Binnentemp",
-    "helty-tx-outdoor-temp": "Buitentemp",
-    "helty-tx-humidity": "Luchtvochtigheid",
-    "helty-tx-co2": "CO2",
-    "helty-tx-voc": "VOC",
-    "helty-tx-filter-hours": "Filteruren",
-    "helty-tx-last-update": "Laatste update",
-    "helty-tx-none": "Nog geen telemetrie.",
-    "eurom-status-online": "Online",
-    "eurom-status-offline": "Offline",
-    "eurom-status-stale": "Verouderde gegevens",
-    "eurom-status-hub-disabled": "Hub uitgeschakeld",
-    "eurom-btn-refresh": "Vernieuwen",
-    "eurom-key-set": "Er is een local key opgeslagen. Laat leeg om te behouden.",
-    "eurom-key-missing": "Geen local key opgeslagen. Plak de 16-tekens key uit tinytuya.",
-    "eurom-saved": "Configuratie opgeslagen.",
-    "eurom-host-required": "Vul een host of IP-adres in.",
-    "eurom-testing": "Verbinding testen...",
-    "eurom-test-ok": "TCP-poort open",
-    "eurom-test-fail": "Verbinding mislukt",
-    "eurom-selected": "Geselecteerd",
-    "eurom-scan-queued": "Scan in wachtrij...",
-    "eurom-busy": "EUROM-client bezet",
-    "eurom-scanning": "Scannen...",
-    "eurom-found": "apparaat(en)",
-    "eurom-scan-done": "Scan voltooid.",
-    "eurom-scan-empty": "Scan voltooid — geen Tuya/EUROM-broadcasts en geen TCP 6668-hosts gevonden.",
-    "eurom-scan-fail": "Scan mislukt",
-    "eurom-scan-start": "Tuya/EUROM-scan starten...",
-    "eurom-scan-timeout": "Scan time-out",
-    "eurom-tx-on": "Voeding",
-    "eurom-tx-setpoint": "Setpoint",
-    "eurom-tx-temp": "Temperatuur",
-    "eurom-tx-unit": "Eenheid",
-    "eurom-tx-timer": "Timer",
-    "eurom-tx-timer-on": "Timer aan",
-    "eurom-tx-schedule": "Schema",
-    "eurom-tx-last-update": "Laatste update",
-    "eurom-tx-last-poll": "Laatste poll",
-    "eurom-tx-connected": "Verbonden",
-    "eurom-tx-error": "Fout",
-    "eurom-none": "—",
-    "eurom-tx-none": "Nog geen telemetrie.",
-    "eurom-on": "Aan",
-    "eurom-off": "Uit",
-    "wiz-on": "Aan",
-    "wiz-color": "Kleur",
-    "wiz-cct": "Kleurtemperatuur",
-    "wiz-name-placeholder": "Lampnaam",
-    "wiz-room-name-placeholder": "Geef deze kamer een naam",
-    "wiz-btn-all-on": "Alles aan",
-    "wiz-btn-all-off": "Alles uit",
-    "wiz-room-unassigned": "Niet toegewezen",
-    "wiz-room-unnamed": "Naamloze kamer",
-    "wiz-status-online": "Online",
-    "wiz-status-off": "Uit",
-    "wiz-status-offline": "Offline",
-    "wiz-no-lights": "Nog geen lampen. Scan en voeg lampen toe.",
-    "wiz-name-hint": "Lampen krijgen de MAC als naam; de lamp zelf heeft geen unieke bijnaam. Hernoem een kaart naar wens. Kamers volgen de WiZ-app (roomId)."
+    "tip-history-graph-old-to-new": "X-as: oud naar nieuw. Klik voor nieuw naar oud."
   },
   en: {
-    "dict_mqtt_helty": "MQTT Air Guard",
-    "dict_mqtt_eurom": "MQTT EUROM",
-    "dict_mqtt_wiz": "MQTT WiZ",
-    "dict_mqtt_monitor": "MQTT monitor",
+    "accu-status-idle": "Idle",
+    "accu-status-charging": "Charging",
+    "accu-status-discharging": "Discharging",
     "net-action-on": "Switch action",
     "net-action-off": "Switch-back action",
     "net-direction": "Respond to",
@@ -6582,78 +5036,12 @@ const FALLBACK_TRANSLATIONS = {
     "lbl-history-order-new-to-old-short": "new→old",
     "lbl-history-order-old-to-new-short": "old→new",
     "tip-history-graph-new-to-old": "X-axis: newest to oldest. Click for oldest to newest.",
-    "tip-history-graph-old-to-new": "X-axis: oldest to newest. Click for newest to oldest.",
-    "helty-status-online": "Online",
-    "helty-status-offline": "Offline",
-    "helty-status-stale": "Stale data",
-    "helty-status-hub-disabled": "Hub disabled",
-    "helty-btn-refresh": "Refresh",
-    "helty-tx-fan-mode": "Fan mode",
-    "helty-tx-indoor-temp": "Indoor temp",
-    "helty-tx-outdoor-temp": "Outdoor temp",
-    "helty-tx-humidity": "Humidity",
-    "helty-tx-co2": "CO2",
-    "helty-tx-voc": "VOC",
-    "helty-tx-filter-hours": "Filter hours",
-    "helty-tx-last-update": "Last update",
-    "helty-tx-none": "No telemetry yet.",
-    "eurom-status-online": "Online",
-    "eurom-status-offline": "Offline",
-    "eurom-status-stale": "Stale data",
-    "eurom-status-hub-disabled": "Hub disabled",
-    "eurom-btn-refresh": "Refresh",
-    "eurom-key-set": "A local key is stored. Leave blank to keep it.",
-    "eurom-key-missing": "Local key is not stored. Paste the 16-character key from tinytuya.",
-    "eurom-saved": "Configuration saved.",
-    "eurom-host-required": "Enter a host or IP address.",
-    "eurom-testing": "Testing connection...",
-    "eurom-test-ok": "TCP port open",
-    "eurom-test-fail": "Connection failed",
-    "eurom-selected": "Selected",
-    "eurom-scan-queued": "Scan queued...",
-    "eurom-busy": "EUROM client busy",
-    "eurom-scanning": "Scanning...",
-    "eurom-found": "device(s)",
-    "eurom-scan-done": "Scan complete.",
-    "eurom-scan-empty": "Scan complete — no Tuya/EUROM broadcasts and no TCP 6668 hosts found.",
-    "eurom-scan-fail": "Scan failed",
-    "eurom-scan-start": "Starting Tuya/EUROM scan...",
-    "eurom-scan-timeout": "Scan timed out",
-    "eurom-tx-on": "Power",
-    "eurom-tx-setpoint": "Setpoint",
-    "eurom-tx-temp": "Temperature",
-    "eurom-tx-unit": "Unit",
-    "eurom-tx-timer": "Timer",
-    "eurom-tx-timer-on": "Timer on",
-    "eurom-tx-schedule": "Schedule",
-    "eurom-tx-last-update": "Last update",
-    "eurom-tx-last-poll": "Last poll",
-    "eurom-tx-connected": "Connected",
-    "eurom-tx-error": "Error",
-    "eurom-none": "—",
-    "eurom-tx-none": "No telemetry yet.",
-    "eurom-on": "On",
-    "eurom-off": "Off",
-    "wiz-on": "On",
-    "wiz-color": "Color",
-    "wiz-cct": "Color temperature",
-    "wiz-name-placeholder": "Light name",
-    "wiz-room-name-placeholder": "Name this room",
-    "wiz-btn-all-on": "All on",
-    "wiz-btn-all-off": "All off",
-    "wiz-room-unassigned": "Unassigned",
-    "wiz-room-unnamed": "Unnamed room",
-    "wiz-status-online": "Online",
-    "wiz-status-off": "Off",
-    "wiz-status-offline": "Offline",
-    "wiz-no-lights": "No lights configured yet. Scan and add bulbs above.",
-    "wiz-name-hint": "Lights are named by MAC because bulbs do not expose a unique nickname on the LAN. Rename any card. Rooms follow your WiZ app grouping (roomId)."
+    "tip-history-graph-old-to-new": "X-axis: oldest to newest. Click for newest to oldest."
   },
   de: {
-    "dict_mqtt_helty": "MQTT Air Guard",
-    "dict_mqtt_eurom": "MQTT EUROM",
-    "dict_mqtt_wiz": "MQTT WiZ",
-    "dict_mqtt_monitor": "MQTT-Monitor",
+    "accu-status-idle": "Inaktiv",
+    "accu-status-charging": "Laden",
+    "accu-status-discharging": "Entladen",
     "net-action-on": "Schaltaktion",
     "net-action-off": "Zurückschaltaktion",
     "net-direction": "Reagieren auf",
@@ -6671,78 +5059,12 @@ const FALLBACK_TRANSLATIONS = {
     "lbl-history-order-new-to-old-short": "neu→alt",
     "lbl-history-order-old-to-new-short": "alt→neu",
     "tip-history-graph-new-to-old": "X-Achse: neu nach alt. Klicken fur alt nach neu.",
-    "tip-history-graph-old-to-new": "X-Achse: alt nach neu. Klicken fur neu nach alt.",
-    "helty-status-online": "Online",
-    "helty-status-offline": "Offline",
-    "helty-status-stale": "Veraltete Daten",
-    "helty-status-hub-disabled": "Hub deaktiviert",
-    "helty-btn-refresh": "Aktualisieren",
-    "helty-tx-fan-mode": "Lüftermodus",
-    "helty-tx-indoor-temp": "Innentemperatur",
-    "helty-tx-outdoor-temp": "Außentemperatur",
-    "helty-tx-humidity": "Luftfeuchtigkeit",
-    "helty-tx-co2": "CO2",
-    "helty-tx-voc": "VOC",
-    "helty-tx-filter-hours": "Filterstunden",
-    "helty-tx-last-update": "Letzte Aktualisierung",
-    "helty-tx-none": "Noch keine Telemetrie.",
-    "eurom-status-online": "Online",
-    "eurom-status-offline": "Offline",
-    "eurom-status-stale": "Veraltete Daten",
-    "eurom-status-hub-disabled": "Hub deaktiviert",
-    "eurom-btn-refresh": "Aktualisieren",
-    "eurom-key-set": "Ein Local Key ist gespeichert. Leer lassen, um ihn zu behalten.",
-    "eurom-key-missing": "Kein Local Key gespeichert. 16-Zeichen-Key aus tinytuya einfügen.",
-    "eurom-saved": "Konfiguration gespeichert.",
-    "eurom-host-required": "Host oder IP-Adresse eingeben.",
-    "eurom-testing": "Verbindung wird getestet...",
-    "eurom-test-ok": "TCP-Port offen",
-    "eurom-test-fail": "Verbindung fehlgeschlagen",
-    "eurom-selected": "Ausgewählt",
-    "eurom-scan-queued": "Scan in Warteschlange...",
-    "eurom-busy": "EUROM-Client beschäftigt",
-    "eurom-scanning": "Suche...",
-    "eurom-found": "Gerät(e)",
-    "eurom-scan-done": "Scan abgeschlossen.",
-    "eurom-scan-empty": "Scan abgeschlossen — keine Tuya/EUROM-Broadcasts und keine TCP-6668-Hosts gefunden.",
-    "eurom-scan-fail": "Scan fehlgeschlagen",
-    "eurom-scan-start": "Tuya/EUROM-Scan starten...",
-    "eurom-scan-timeout": "Scan-Zeitüberschreitung",
-    "eurom-tx-on": "Leistung",
-    "eurom-tx-setpoint": "Sollwert",
-    "eurom-tx-temp": "Temperatur",
-    "eurom-tx-unit": "Einheit",
-    "eurom-tx-timer": "Timer",
-    "eurom-tx-timer-on": "Timer an",
-    "eurom-tx-schedule": "Zeitplan",
-    "eurom-tx-last-update": "Letzte Aktualisierung",
-    "eurom-tx-last-poll": "Letzter Poll",
-    "eurom-tx-connected": "Verbunden",
-    "eurom-tx-error": "Fehler",
-    "eurom-none": "—",
-    "eurom-tx-none": "Noch keine Telemetrie.",
-    "eurom-on": "Ein",
-    "eurom-off": "Aus",
-    "wiz-on": "Ein",
-    "wiz-color": "Farbe",
-    "wiz-cct": "Farbtemperatur",
-    "wiz-name-placeholder": "Lichtname",
-    "wiz-room-name-placeholder": "Raum benennen",
-    "wiz-btn-all-on": "Alle ein",
-    "wiz-btn-all-off": "Alle aus",
-    "wiz-room-unassigned": "Nicht zugeordnet",
-    "wiz-room-unnamed": "Unbenannter Raum",
-    "wiz-status-online": "Online",
-    "wiz-status-off": "Aus",
-    "wiz-status-offline": "Offline",
-    "wiz-no-lights": "Noch keine Lichter. Netz scannen und Lampen hinzufügen.",
-    "wiz-name-hint": "Lampen werden nach MAC benannt, weil die Birne keinen eindeutigen Namen per LAN liefert. Karten können umbenannt werden. Räume folgen der WiZ-App (roomId)."
+    "tip-history-graph-old-to-new": "X-Achse: alt nach neu. Klicken fur neu nach alt."
   },
   se: {
-    "dict_mqtt_helty": "MQTT Air Guard",
-    "dict_mqtt_eurom": "MQTT EUROM",
-    "dict_mqtt_wiz": "MQTT WiZ",
-    "dict_mqtt_monitor": "MQTT-monitor",
+    "accu-status-idle": "Inaktiv",
+    "accu-status-charging": "Laddar",
+    "accu-status-discharging": "Urladdning",
     "net-action-on": "Växlingsåtgärd",
     "net-action-off": "Återgångsåtgärd",
     "net-direction": "Reagera på",
@@ -6760,78 +5082,36 @@ const FALLBACK_TRANSLATIONS = {
     "lbl-history-order-new-to-old-short": "ny→gammal",
     "lbl-history-order-old-to-new-short": "gammal→ny",
     "tip-history-graph-new-to-old": "X-axel: nyast till aldst. Klicka for aldst till nyast.",
-    "tip-history-graph-old-to-new": "X-axel: aldst till nyast. Klicka for nyast till aldst.",
-    "helty-status-online": "Online",
-    "helty-status-offline": "Offline",
-    "helty-status-stale": "Föråldrad data",
-    "helty-status-hub-disabled": "Hubb inaktiverad",
-    "helty-btn-refresh": "Uppdatera",
-    "helty-tx-fan-mode": "Fläktläge",
-    "helty-tx-indoor-temp": "Innetemp",
-    "helty-tx-outdoor-temp": "Utetemp",
-    "helty-tx-humidity": "Luftfuktighet",
-    "helty-tx-co2": "CO2",
-    "helty-tx-voc": "VOC",
-    "helty-tx-filter-hours": "Filtertimmar",
-    "helty-tx-last-update": "Senaste uppdatering",
-    "helty-tx-none": "Ingen telemetri ännu.",
-    "eurom-status-online": "Online",
-    "eurom-status-offline": "Offline",
-    "eurom-status-stale": "Föråldrad data",
-    "eurom-status-hub-disabled": "Hubb inaktiverad",
-    "eurom-btn-refresh": "Uppdatera",
-    "eurom-key-set": "En local key är sparad. Lämna tomt för att behålla den.",
-    "eurom-key-missing": "Ingen local key sparad. Klistra in 16-teckensnyckeln från tinytuya.",
-    "eurom-saved": "Konfiguration sparad.",
-    "eurom-host-required": "Ange en värd eller IP-adress.",
-    "eurom-testing": "Testar anslutning...",
-    "eurom-test-ok": "TCP-port öppen",
-    "eurom-test-fail": "Anslutningen misslyckades",
-    "eurom-selected": "Vald",
-    "eurom-scan-queued": "Skanning i kö...",
-    "eurom-busy": "EUROM-klienten är upptagen",
-    "eurom-scanning": "Skannar...",
-    "eurom-found": "enhet(er)",
-    "eurom-scan-done": "Skanning klar.",
-    "eurom-scan-empty": "Skanning klar — inga Tuya/EUROM-broadcasts och inga TCP 6668-värdar hittades.",
-    "eurom-scan-fail": "Skanning misslyckades",
-    "eurom-scan-start": "Startar Tuya/EUROM-skanning...",
-    "eurom-scan-timeout": "Skanningen tog för lång tid",
-    "eurom-tx-on": "Ström",
-    "eurom-tx-setpoint": "Börvärde",
-    "eurom-tx-temp": "Temperatur",
-    "eurom-tx-unit": "Enhet",
-    "eurom-tx-timer": "Timer",
-    "eurom-tx-timer-on": "Timer på",
-    "eurom-tx-schedule": "Schema",
-    "eurom-tx-last-update": "Senaste uppdatering",
-    "eurom-tx-last-poll": "Senaste poll",
-    "eurom-tx-connected": "Ansluten",
-    "eurom-tx-error": "Fel",
-    "eurom-none": "—",
-    "eurom-tx-none": "Ingen telemetri ännu.",
-    "eurom-on": "På",
-    "eurom-off": "Av",
-    "wiz-on": "På",
-    "wiz-color": "Färg",
-    "wiz-cct": "Färgtemperatur",
-    "wiz-name-placeholder": "Lampnamn",
-    "wiz-room-name-placeholder": "Namnge rummet",
-    "wiz-btn-all-on": "Alla på",
-    "wiz-btn-all-off": "Alla av",
-    "wiz-room-unassigned": "Ej tilldelad",
-    "wiz-room-unnamed": "Namnlöst rum",
-    "wiz-status-online": "Online",
-    "wiz-status-off": "Av",
-    "wiz-status-offline": "Offline",
-    "wiz-no-lights": "Inga lampor ännu. Skanna och lägg till lampor.",
-    "wiz-name-hint": "Lampor namnges med MAC eftersom lampan inte har ett unikt smeknamn på LAN. Byt namn på kortet. Rum följer WiZ-appen (roomId)."
+    "tip-history-graph-old-to-new": "X-axel: aldst till nyast. Klicka for nyast till aldst."
+  },
+  fr: {
+    "accu-status-idle": "Inactif",
+    "accu-status-charging": "En charge",
+    "accu-status-discharging": "En décharge",
+    "net-action-on": "Action de commutation",
+    "net-action-off": "Action de retour",
+    "net-direction": "Réagir à",
+    "net-direction-return": "Injection",
+    "net-direction-deliver": "Consommation",
+    "net-value-on": "À partir de",
+    "net-value-off": "En dessous de",
+    "net-intro-2": "Shelly/IO devient",
+    "net-off-state": "Shelly/IO devient",
+    "net-threshold-error": "Le seuil de retour doit être inférieur au seuil de commutation.",
+    "net-unit-watt": "Watt",
+    "net-unit-seconds": "secondes",
+    "net-on-delay": "Délai",
+    "net-off-delay": "Délai",
+    "lbl-history-order-new-to-old-short": "récent→ancien",
+    "lbl-history-order-old-to-new-short": "ancien→récent",
+    "tip-history-graph-new-to-old": "Axe X : du plus récent au plus ancien. Cliquez pour inverser l'ordre.",
+    "tip-history-graph-old-to-new": "Axe X : du plus ancien au plus récent. Cliquez pour inverser l'ordre."
   }
 };
 const URL_I18N = typeof DEBUG !== 'undefined' && DEBUG
   ? "http://localhost/~martijn/dsmr-api/v5/lang"
   : (typeof CDN_BASE !== 'undefined' ? CDN_BASE
-       : "https://cdn.jsdelivr.net/gh/pioreq2580/ultra-dongle-web@main/cdn") + "/lang";
+       : "https://cdn.jsdelivr.net/gh/p-chodorowski/P1-Dongel-ESP32@5.8.7/cdn") + "/lang";
 
 function t(key) {
   return translations[key] || FALLBACK_TRANSLATIONS[locale]?.[key] || FALLBACK_TRANSLATIONS.en[key] || key;
@@ -6841,22 +5121,20 @@ function td(key) {
   return t("dict_" + key);
 }
 
-function applyTranslations(root) {
-  const scope = root && root.querySelectorAll ? root : document;
-  scope.querySelectorAll('[data-i18n-key]').forEach(el => {
+function applyTranslations() {
+  document.querySelectorAll('[data-i18n-key]').forEach(el => {
     const key = el.getAttribute('data-i18n-key');
     const translation = t(key);
     if (translation !== key) el.innerHTML = translation;
   });
-  scope.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
-    const key = el.getAttribute('data-i18n-placeholder');
+  document.querySelectorAll('[data-i18n-value]').forEach(el => {
+    const key = el.getAttribute('data-i18n-value');
     const translation = t(key);
-    if (translation !== key) el.setAttribute('placeholder', translation);
+    if (translation !== key) el.value = translation;
   });
-  if (scope === document) {
-    updateBrowserSettingsControls();
-    NetSwitchUpdateBar();
-  }
+  updateBrowserSettingsControls();
+  updateDashboardControls();
+  NetSwitchUpdateBar();
 }
 
 function changeLanguage(lang) {
@@ -6867,23 +5145,17 @@ function changeLanguage(lang) {
 }
 
 function loadTranslations(lang) {
-  const localUrl = (typeof window.cdnAsset === "function")
-    ? window.cdnAsset("lang/" + lang + ".json")
-    : "";
-  const remoteUrl = URL_I18N + `/${lang}.json`;
-  const firstUrl = localUrl || remoteUrl;
-  console.log(firstUrl);
-  fetch(firstUrl)
-    .then(response => {
-      if (response.ok) return response.json();
-      if (localUrl && firstUrl === localUrl) return fetch(remoteUrl).then(r => {
-        if (!r.ok) throw new Error("HTTP " + r.status);
-        return r.json();
-      });
-      throw new Error("HTTP " + response.status);
-    })
-    .then(json => {
-      translations = json;
+  const languages = lang === 'en' ? ['en'] : ['en', lang];
+  Promise.all(languages.map(language => {
+    const url = URL_I18N + `/${language}.json`;
+    console.log(url);
+    return fetch(url).then(response => {
+      if (!response.ok) throw new Error(`Could not load ${language} translations`);
+      return response.json();
+    });
+  }))
+    .then(jsons => {
+      translations = Object.assign({}, ...jsons);
       applyTranslations();
     })
     .catch(err => console.error("Error fetching lang file:", err));

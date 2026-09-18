@@ -40,7 +40,6 @@ const URL_DEVICE_SETTINGS   = APIGW + "v2/dev/settings";
 const URL_INSIGHTS			= APIGW + "v2/stats";
 const URL_EID_CLAIM			= "/eid/getclaim";
 const URL_NETSWITCH			= "/netswitch.json";
-const URL_VERSION_MANIFEST 	= "http://ota.smart-stuff.nl/v5/version-manifest.json?dummy=" + Date.now();
 const URL_ESPHOME_MANIFEST  = "http://ota.smart-stuff.nl/esphome/esphome-manifest.json?dummy=" + Date.now();
 
 const MAX_SM_ACTUAL     	= 15*60/5; //store the last 15 minutes (each interval is 10sec)
@@ -515,6 +514,7 @@ class dsmr_dal_main{
 		}
 
 	    refreshManifest(){
+		  if (!ota_url) return;
 		  this.fetchDataJSON( "http://" + ota_url + "version-manifest.json?dummy=" + Date.now() , this.parseVersionManifest.bind(this));
 	    }
 
@@ -531,9 +531,9 @@ class dsmr_dal_main{
 	    parseDeviceSettings(json){
       this.dev_settings = json;
       
-	      //because the manifest check uses the ota_url.value from the device settings
-	      "ota_url" in json ? ota_url = json.ota_url.value: ota_url = "ota.smart-stuff.nl/v5/";
-		  this.startManifestPolling();      
+	      // Manifest check uses ota_url from device settings only (no vendor fallback).
+	      ota_url = ("ota_url" in json && json.ota_url.value) ? json.ota_url.value : "";
+		  if (ota_url) this.startManifestPolling();
 	      this.callback?.('dev_settings', json);
 	    }
         
