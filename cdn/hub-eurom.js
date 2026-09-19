@@ -1,4 +1,20 @@
-﻿function euromApi(path, method, body) {
+﻿let euromTestTimer = null;
+let euromManagementTimer = null;
+let euromCommandTimer = null;
+let euromCommandStartedAt = 0;
+let euromLastLiveKey = "";
+let euromUiState = { on: false, setpoint_c: null };
+const EUROM_LIVE_MS = 1000;
+const EUROM_CMD_IDLE = 0;
+const EUROM_CMD_RUNNING = 1;
+const EUROM_CMD_DONE = 2;
+const EUROM_CMD_ERROR = 3;
+const EUROM_CMD_POLL_MS = 400;
+const EUROM_CMD_TIMEOUT_MS = 20000;
+const EUROM_SETPOINT_MIN = 0;
+const EUROM_SETPOINT_MAX = 37;
+
+function euromApi(path, method, body) {
   const opts = { method: method || "GET", headers: { "Content-Type": "application/json" } };
   if (body !== undefined) opts.body = JSON.stringify(body);
   return fetch(APIHOST + path, opts).then(async r => {
@@ -66,7 +82,7 @@ function euromTest() {
   euromApi("/api/v2/eurom/discover", "POST", { mode: "test", host, port })
     .then(() => {
       if (euromTestTimer) clearInterval(euromTestTimer);
-      euromTestTimer = setInterval(euromPollTestStatus, 2000);
+      euromTestTimer = setInterval(euromPollTestStatus, 400);
       euromPollTestStatus();
     })
     .catch(err => euromSetStatus("eurom_discover_status", "Test failed: " + err, true));
@@ -81,7 +97,7 @@ function euromPollTestStatus() {
         clearInterval(euromTestTimer);
         euromTestTimer = null;
         const extra = json.test_device_id ? " (" + json.test_device_id + ")" : "";
-        const warn = json.error ? " â€” " + json.error : "";
+        const warn = json.error ? " — " + json.error : "";
         euromSetStatus("eurom_discover_status", t("eurom-test-ok") + extra + warn, false);
       } else if (json.phase === 4 && json.test_host) {
         clearInterval(euromTestTimer);
@@ -96,110 +112,8 @@ function euromPollTestStatus() {
     });
 }
 
-function euromSetDiscoverButtonsDisabled(disabled) {
-  document.querySelectorAll("#EuromDiscover button").forEach(btn => {
-    btn.disabled = !!disabled;
-  });
-}
-
-function euromStopDiscoverPolling() {
-  if (euromScanTimer) {
-    clearInterval(euromScanTimer);
-    euromScanTimer = null;
-  }
-  if (euromScanTimeoutTimer) {
-    clearTimeout(euromScanTimeoutTimer);
-    euromScanTimeoutTimer = null;
-  }
-  if (euromTestTimer) {
-    clearInterval(euromTestTimer);
-    euromTestTimer = null;
-  }
-  euromSetDiscoverButtonsDisabled(false);
-}
-
-function euromFinishScan(message, isError) {
-  euromStopDiscoverPolling();
-  euromSetStatus("eurom_scan_progress", message, isError);
-}
-
-function euromSelectResult(item) {
-  if (!item) return;
-  if (item.host) document.getElementById("eurom_host").value = item.host;
-  if (item.device_id) document.getElementById("eurom_device_id").value = item.device_id;
-  const ver = String(item.version || "");
-  if (ver.indexOf("3.5") === 0) document.getElementById("eurom_protocol").value = "3.5";
-  else if (ver.indexOf("3.4") === 0) document.getElementById("eurom_protocol").value = "3.4";
-  else if (ver.indexOf("3.3") === 0 || ver.indexOf("3.1") === 0 || ver.indexOf("3.2") === 0) {
-    document.getElementById("eurom_protocol").value = "3.3";
-  }
-  euromSetStatus("eurom_discover_status", t("eurom-selected") + " " + (item.host || "") + (item.device_id ? " / " + item.device_id : ""), false);
-}
-
-function euromRenderScanResults(results) {
-  const table = document.getElementById("eurom_scan_results");
-  const body = document.getElementById("eurom_scan_results_body");
-  if (!table || !body) return;
-  body.innerHTML = "";
-  if (!results || !results.length) {
-    table.style.display = "none";
-    return;
-  }
-  results.forEach(item => {
-    const row = document.createElement("tr");
-    row.innerHTML = `<td>${item.host || "-"}</td><td>${item.device_id || "-"}</td><td>${item.version || item.source || "-"}</td><td><button type="button">Select</button></td>`;
-    row.querySelector("button").onclick = () => euromSelectResult(item);
-    body.appendChild(row);
-  });
-  table.style.display = "";
-}
-
-function euromPollScanStatus() {
-  euromApi("/api/v2/eurom/discover")
-    .then(json => {
-      if (json.phase === 0) {
-        euromSetStatus("eurom_scan_progress", t("eurom-scan-queued"), false);
-      } else if (json.phase === 1) {
-        euromFinishScan(t("eurom-busy"), true);
-      } else if (json.phase === 2) {
-        const partial = json.results || [];
-        if (partial.length) euromRenderScanResults(partial);
-        const foundNote = partial.length
-          ? " â€” " + partial.length + " " + t("eurom-found")
-          : "";
-        euromSetStatus("eurom_scan_progress", t("eurom-scanning") + " " + (json.progress || 0) + "%" + foundNote, false);
-      } else if (json.phase === 3) {
-        const results = json.results || [];
-        euromFinishScan(results.length ? t("eurom-scan-done") : t("eurom-scan-empty"), false);
-        euromRenderScanResults(results);
-        if (results.length === 1) euromSelectResult(results[0]);
-      } else if (json.phase === 4) {
-        euromFinishScan(json.error || t("eurom-scan-fail"), true);
-      }
-    })
-    .catch(err => {
-      euromFinishScan("Scan status failed: " + err, true);
-    });
-}
-
 function euromScan() {
-  if (euromScanTimer) return;
-  euromSetStatus("eurom_scan_progress", t("eurom-scan-start"), false);
-  document.getElementById("eurom_scan_results").style.display = "none";
-  euromSetDiscoverButtonsDisabled(true);
-  euromApi("/api/v2/eurom/discover", "POST", { mode: "scan" })
-    .then(() => {
-      euromStopDiscoverPolling();
-      euromSetDiscoverButtonsDisabled(true);
-      euromScanTimer = setInterval(euromPollScanStatus, EUROM_SCAN_POLL_MS);
-      euromPollScanStatus();
-      euromScanTimeoutTimer = setTimeout(() => {
-        if (euromScanTimer) euromFinishScan(t("eurom-scan-timeout"), true);
-      }, EUROM_SCAN_TIMEOUT_MS);
-    })
-    .catch(err => {
-      euromFinishScan("Scan start failed: " + err, true);
-    });
+  location.hash = "HubDevices";
 }
 
 function euromEscapeHtml(str) {
@@ -226,7 +140,6 @@ function euromUpdateStatusBadge(json) {
     stateClass = "helty-warn";
     icon = "mdi-clock-alert-outline";
     label = t("eurom-status-stale");
-    if (json.last_poll_age_sec !== undefined) label += " (" + json.last_poll_age_sec + "s)";
     deviceLine = euromEscapeHtml(json.name || json.host || "");
   } else {
     stateClass = "helty-error";
@@ -257,32 +170,24 @@ function euromUpdateTelemetryGrid(json) {
   let html = "";
   html += card(t("eurom-tx-connected"), json.connected ? t("eurom-status-online") : t("eurom-status-offline"));
   html += card(t("eurom-tx-on"), json.on ? t("eurom-on") : t("eurom-off"));
-  html += card(t("eurom-tx-setpoint"), json.setpoint_c, "Â°C");
-  html += card(t("eurom-tx-temp"), json.temperature_c, "Â°C");
-  if (json.unit_f) html += card(t("eurom-tx-unit"), "Â°F");
+  html += card(t("eurom-tx-setpoint"), json.setpoint_c, "\u00b0C");
+  html += card(t("eurom-tx-temp"), json.temperature_c, "\u00b0C");
   html += card(t("eurom-tx-timer"), json.timer_min, "min");
-  html += card(t("eurom-tx-timer-on"), json.timer_on === undefined ? "" : (json.timer_on ? t("eurom-on") : t("eurom-off")));
-  html += card(t("eurom-tx-schedule"), json.schedule_mode);
-  if (json.last_poll_age_sec !== undefined) html += card(t("eurom-tx-last-poll"), json.last_poll_age_sec, "s");
-  else html += card(t("eurom-tx-last-poll"), json.last_poll);
-  html += card(t("eurom-tx-error"), json.error);
+  if (json.error) html += card(t("eurom-tx-error"), json.error);
   grid.innerHTML = html || `<div class="helty-status">${t("eurom-tx-none")}</div>`;
 }
 
 function euromRefreshLive() {
-  const refreshBtn = document.getElementById("eurom_refresh_btn");
-  if (refreshBtn) refreshBtn.disabled = true;
   return euromApi("/api/v2/eurom/live").then(json => {
-    if (!euromCommandTimer) euromSetStatus("eurom_manage_message", "", false);
     euromUpdateStatusBadge(json);
-    euromUpdateTelemetryGrid(json);
-    euromSeedUiState(json);
+    const key = [json.connected, json.on, json.setpoint_c, json.temperature_c, json.error].join("|");
+    if (key !== euromLastLiveKey) {
+      euromLastLiveKey = key;
+      euromUpdateTelemetryGrid(json);
+    }
+    if (!euromCommandTimer) euromSeedUiState(json);
     return json;
-  }).catch(err => {
-    euromSetStatus("eurom_manage_message", "Refresh failed: " + err, true);
-  }).finally(() => {
-    if (refreshBtn) refreshBtn.disabled = false;
-  });
+  }).catch(err => euromSetStatus("eurom_manage_message", "Refresh failed: " + err, true));
 }
 
 function euromSeedUiState(json) {
@@ -302,8 +207,8 @@ function euromRenderControls() {
   const valueEl = document.getElementById("eurom_setpoint_value");
   if (valueEl) {
     valueEl.textContent = Number.isFinite(euromUiState.setpoint_c)
-      ? euromUiState.setpoint_c + " Â°C"
-      : "â€”";
+      ? euromUiState.setpoint_c + " \u00b0C"
+      : "\u2014";
   }
 }
 
@@ -317,8 +222,7 @@ function euromFinishCommand(successMsg, failureMsg, isError) {
   if (euromCommandTimer) clearInterval(euromCommandTimer);
   euromCommandTimer = null;
   euromCommandStartedAt = 0;
-  euromSetControlsDisabled(false);
-  euromSetStatus("eurom_manage_message", isError ? failureMsg : successMsg, isError);
+  euromSetStatus("eurom_manage_message", isError ? failureMsg : "", isError);
   euromLastCommandPayload = null;
   euromRefreshLive();
 }
@@ -331,10 +235,8 @@ function euromPollCommandStatus(successMsg, failurePrefix) {
 
   euromApi("/api/v2/eurom/command")
     .then(json => {
-      if (json.phase === EUROM_CMD_RUNNING) {
-        euromSetControlsDisabled(true);
-        euromSetStatus("eurom_manage_message", t("eurom-cmd-sending"), false);
-      } else if (json.phase === EUROM_CMD_DONE && json.ok) {
+      if (json.phase === EUROM_CMD_RUNNING) return;
+      if (json.phase === EUROM_CMD_DONE && json.ok) {
         euromFinishCommand(successMsg, json.error || failurePrefix, false);
       } else if (json.phase === EUROM_CMD_ERROR || (json.phase === EUROM_CMD_DONE && !json.ok)) {
         euromFinishCommand(successMsg, json.error || failurePrefix, true);
@@ -351,7 +253,6 @@ function euromStartCommand(payload, successMsg, failurePrefix) {
     .then(() => {
       if (euromCommandTimer) clearInterval(euromCommandTimer);
       euromCommandStartedAt = Date.now();
-      euromSetControlsDisabled(true);
       euromCommandTimer = setInterval(() => euromPollCommandStatus(successMsg, failurePrefix), EUROM_CMD_POLL_MS);
       euromPollCommandStatus(successMsg, failurePrefix);
     })
@@ -401,10 +302,11 @@ function initEuromControlGrid() {
 }
 
 function euromStartManagement() {
+  fetchEuromConfig();
   initEuromControlGrid();
   euromRefreshLive();
   if (euromManagementTimer) clearInterval(euromManagementTimer);
-  euromManagementTimer = setInterval(euromRefreshLive, EUROM_MANAGEMENT_POLL_MS);
+  euromManagementTimer = setInterval(euromRefreshLive, EUROM_LIVE_MS);
 }
 
 function euromStopManagementPolling() {
@@ -412,32 +314,12 @@ function euromStopManagementPolling() {
     clearInterval(euromManagementTimer);
     euromManagementTimer = null;
   }
+  if (euromTestTimer) {
+    clearInterval(euromTestTimer);
+    euromTestTimer = null;
+  }
 }
 
 function euromStartDiscover() {
   fetchEuromConfig();
-  euromStopDiscoverPolling();
 }
-
-let wizScanTimer = null;
-let wizPageTimer = null;
-let wizConfiguredLights = [];
-let wizConfiguredRooms = [];
-let wizPollSec = 30;
-let wizRgbDebounce = {};
-let wizCctDebounce = {};
-let wizScanSelectedMacs = new Set();
-
-const WIZ_SCAN_POLL_MS = 1000;
-const WIZ_PAGE_POLL_MS = 5000;
-const WIZ_CMD_REFRESH_MS = 400;
-const WIZ_RGB_DEBOUNCE_MS = 180;
-const WIZ_CCT_DEBOUNCE_MS = 350;
-const WIZ_CCT_MIN = 2700;
-const WIZ_CCT_MAX = 6500;
-const WIZ_SCAN_TIMEOUT_MS = 120000;
-const WIZ_DISCOVER_SCANNING = 1;
-const WIZ_DISCOVER_DONE = 2;
-const WIZ_DISCOVER_ERROR = 3;
-const WIZ_MOCK_MAC = "aabbccddeeff";
-

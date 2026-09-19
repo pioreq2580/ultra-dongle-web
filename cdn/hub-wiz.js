@@ -1,4 +1,26 @@
-﻿function wizApi(path, method, body) {
+﻿let wizScanTimer = null;
+let wizPageTimer = null;
+let wizConfiguredLights = [];
+let wizConfiguredRooms = [];
+let wizPollSec = 30;
+let wizRgbDebounce = {};
+let wizCctDebounce = {};
+let wizScanSelectedMacs = new Set();
+
+const WIZ_SCAN_POLL_MS = 1000;
+const WIZ_PAGE_POLL_MS = 1000;
+const WIZ_CMD_REFRESH_MS = 400;
+const WIZ_RGB_DEBOUNCE_MS = 180;
+const WIZ_CCT_DEBOUNCE_MS = 350;
+const WIZ_CCT_MIN = 2700;
+const WIZ_CCT_MAX = 6500;
+const WIZ_SCAN_TIMEOUT_MS = 120000;
+const WIZ_DISCOVER_SCANNING = 1;
+const WIZ_DISCOVER_DONE = 2;
+const WIZ_DISCOVER_ERROR = 3;
+const WIZ_MOCK_MAC = "aabbccddeeff";
+
+function wizApi(path, method, body) {
   const opts = { method: method || "GET", headers: { "Content-Type": "application/json" } };
   if (body !== undefined) opts.body = JSON.stringify(body);
   return fetch(APIHOST + path, opts).then(async r => {
@@ -275,19 +297,7 @@ function wizBindScanTable() {
 }
 
 function wizScan() {
-  wizScanSelectedMacs = new Set();
-  wizSetStatus(typeof t === "function" ? t("wiz-scan-starting") : "Starting network scan...", false);
-  document.getElementById("wiz_scan_progress").textContent = "";
-  const scanBody = document.getElementById("wiz_scan_body");
-  if (scanBody) scanBody.innerHTML = "";
-  document.getElementById("wiz_scan_table").style.display = "none";
-  wizApi("/api/v2/wiz/discover", "POST", {})
-    .then(() => {
-      if (wizScanTimer) clearInterval(wizScanTimer);
-      wizScanTimer = setInterval(wizPollScan, WIZ_SCAN_POLL_MS);
-      wizPollScan();
-    })
-    .catch(err => wizSetStatus("Scan failed: " + err, true));
+  location.hash = "HubDevices";
 }
 
 function wizProbeIp() {
@@ -307,27 +317,50 @@ function wizProbeIp() {
     .catch(err => wizSetStatus("Probe failed: " + err, true));
 }
 
+function wizAddFoundLights(results) {
+  const known = new Set((wizConfiguredLights || []).map(l => l.mac));
+  let added = 0;
+  (results || []).forEach(item => {
+    if (!item.mac || known.has(item.mac) || wizIsMockLight(item)) return;
+    const roomId = item.room_id || 0;
+    const roomName = item.room || "";
+    wizConfiguredLights.push({
+      mac: item.mac,
+      ip: item.ip || "",
+      name: item.name || item.mac,
+      room_id: roomId,
+      room: roomName,
+      enabled: true
+    });
+    if (roomId && roomName && !wizConfiguredRooms.find(r => r.id === roomId)) {
+      wizConfiguredRooms.push({ id: roomId, name: roomName });
+    }
+    known.add(item.mac);
+    added++;
+  });
+  if (!added) return Promise.resolve(0);
+  return wizSaveConfig().then(() => wizRefreshLights()).then(() => added);
+}
+
 function wizPollScan() {
   if (!wizShouldPoll()) return;
   wizApi("/api/v2/wiz/discover")
     .then(json => {
-      const prog = document.getElementById("wiz_scan_progress");
       if (json.phase === WIZ_DISCOVER_SCANNING) {
-        const partial = (json.results || []).filter(item => !wizIsMockLight(item));
-        if (partial.length) wizRenderScanResults(partial);
-        prog.textContent = wizScanProgressText(json);
+        wizSetStatus(wizScanProgressText(json), false);
       } else if (json.phase === WIZ_DISCOVER_DONE) {
         if (wizScanTimer) { clearInterval(wizScanTimer); wizScanTimer = null; }
-        prog.textContent = "";
         const results = (json.results || []).filter(item => !wizIsMockLight(item));
-        wizRenderScanResults(results);
-        const n = results.length;
-        wizSetStatus(n
-          ? ((typeof t === "function" ? t("wiz-scan-done") : "Found") + " " + n + " light(s).")
-          : (typeof t === "function" ? t("wiz-scan-none") : "Scan complete â€” no WiZ lights found on this subnet."), false);
+        wizAddFoundLights(results).then(added => {
+          const n = results.length;
+          wizSetStatus(added
+            ? ((typeof t === "function" ? t("wiz-scan-done") : "Found") + " " + added + " light(s).")
+            : (n
+              ? (typeof t === "function" ? t("wiz-scan-done") : "Found") + " " + n + " light(s)."
+              : (typeof t === "function" ? t("wiz-scan-none") : "No WiZ lights found.")), false);
+        });
       } else if (json.phase === WIZ_DISCOVER_ERROR) {
         if (wizScanTimer) { clearInterval(wizScanTimer); wizScanTimer = null; }
-        prog.textContent = "";
         wizSetStatus(json.error || "Scan failed", true);
       }
     })

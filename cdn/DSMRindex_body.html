@@ -28,17 +28,10 @@
 	  <li><a id='bDashTab'    	data-i18n-key="mnu-dash" class='tabButton nav-item active' href="#DashTab">Dash</a></li>
 	  <li><a id='bActualTab'    data-i18n-key="mnu-actual" class='tabButton nav-item' href="#ActualTab" >Actueel</a></li>
 	  <li><a id='bInsightsTab'    data-i18n-key="mnu-insghts" class='tabButton nav-item' href="#InsightsTab" >Insights</a></li>
-	  <li><a id='bHeltyTab'       data-i18n-key="mnu-helty" href="javascript:void(0);">Air Guard</a>
-        <ul>
-          <li><a id='bHeltyDiscover' data-i18n-key="mnu-helty-discover" class='tabButton nav-item' href="#HeltyDiscover">Discover</a></li>
-          <li><a id='bHeltyManagement' data-i18n-key="mnu-helty-management" class='tabButton nav-item' href="#HeltyManagement">Management</a></li>
-        </ul></li>
+	  <li><a id='bHubDevices' data-i18n-key="mnu-devices" class='tabButton nav-item' href="#HubDevices">Devices</a></li>
+	  <li><a id='bHeltyManagement' data-i18n-key="mnu-helty" class='tabButton nav-item' href="#HeltyManagement">Air Guard</a></li>
 	  <li><a id='bWizLights' data-i18n-key="mnu-wiz" class='tabButton nav-item' href="#WizLights">Lights</a></li>
-	  <li><a id='bEuromTab' data-i18n-key="mnu-eurom" href="javascript:void(0);">EUROM</a>
-        <ul>
-          <li><a id='bEuromDiscover' data-i18n-key="mnu-eurom-discover" class='tabButton nav-item' href="#EuromDiscover">Discover</a></li>
-          <li><a id='bEuromManagement' data-i18n-key="mnu-eurom-management" class='tabButton nav-item' href="#EuromManagement">Management</a></li>
-        </ul></li>
+	  <li><a id='bEuromManagement' data-i18n-key="mnu-eurom" class='tabButton nav-item' href="#EuromManagement">EUROM</a></li>
 	  	  
       <li><a id='bHoursTab'     data-i18n-key="mnu-hour" class='tabButton nav-item' href="#HoursTab" >Uur</a></li>
       <li><a id='bDaysTab'      data-i18n-key="mnu-day" class='tabButton nav-item' href="#DaysTab" >Dag</a></li>
@@ -637,228 +630,224 @@
 </table>
   </section>  <!-- END API docs Tab -->
     
-	<section id="HeltyDiscover" class="tabName">
-		<div id="eid-setup">
-		<h1 class="align-c" data-i18n-key="helty-discover-title">Air Guard Discover</h1>
-		<p data-i18n-key="helty-discover-intro">Connect one Helty Air Guard unit on your LAN (TCP port 5001).</p>
-		<hr>
-		<label for="helty_host" data-i18n-key="helty-host">Host / IP address</label><br>
-		<input type="text" id="helty_host" placeholder="192.168.1.50" style="width:100%"><br><br>
-		<label for="helty_port" data-i18n-key="helty-port">Port</label><br>
-		<input type="number" id="helty_port" value="5001"><br><br>
-		<label for="helty_poll" data-i18n-key="helty-poll-interval">Poll interval (seconds)</label><br>
-		<input type="number" id="helty_poll" value="30" min="10"><br><br>
-		<label><input type="checkbox" id="helty_enabled"> <span data-i18n-key="helty-enabled">Enable Air Guard hub</span></label>
-		<hr>
-		<div class="align-c">
-			<button type="button" onclick="heltyTest()" data-i18n-key="helty-btn-test">Test connection</button>
-			<button type="button" onclick="heltyScan()" data-i18n-key="helty-btn-scan">Scan network</button>
-			<button type="button" onclick="heltySave()" data-i18n-key="btn-save">Save</button>
-		</div>
-		<div id="helty_discover_status" class="helty-status"></div>
-		<div id="helty_scan_progress" class="helty-status"></div>
-		<table id="helty_scan_results" style="display:none">
-			<thead><tr><th data-i18n-key="helty-col-name">Name</th><th data-i18n-key="helty-col-host">Host</th><th></th></tr></thead>
-			<tbody id="helty_scan_results_body"></tbody>
-		</table>
-		</div>
-    </section>
-
-	<section id="HeltyManagement" class="tabName">
-		<h2 class="align-c" data-i18n-key="helty-management-title">Air Guard Management</h2>
-		<div class="helty-status-header">
-			<div id="helty_status_badge" class="helty-status-bar">...</div>
-			<button type="button" id="helty_refresh_btn" onclick="heltyRefreshManagement()">
-				<span class="iconify" data-icon="mdi-refresh"></span>
-				<span data-i18n-key="helty-btn-refresh">Refresh</span>
-			</button>
-		</div>
-		<div id="helty_telemetry" class="outer"></div>
-		<hr>
-		<h3 class="align-c"><span class="iconify" data-icon="mdi-tune-variant"></span> <span data-i18n-key="helty-controls">Controls</span></h3>
-		<div id="helty_ctrl_grid" class="helty-ctrl-grid">
-			<button type="button" class="helty-ctrl-btn" data-fan-mode="LOW">
-				<span class="iconify helty-ctrl-icon" data-icon="mdi-fan-speed-1"></span>
-				<span class="helty-ctrl-label" data-i18n-key="helty-ctrl-low">Low</span>
-			</button>
-			<button type="button" class="helty-ctrl-btn" data-fan-mode="MEDIUM">
-				<span class="iconify helty-ctrl-icon" data-icon="mdi-fan-speed-2"></span>
-				<span class="helty-ctrl-label" data-i18n-key="helty-ctrl-medium">Medium</span>
-			</button>
-			<button type="button" class="helty-ctrl-btn" data-fan-mode="HIGH">
-				<span class="iconify helty-ctrl-icon" data-icon="mdi-fan-speed-3"></span>
-				<span class="helty-ctrl-label" data-i18n-key="helty-ctrl-high">High</span>
-			</button>
-			<button type="button" class="helty-ctrl-btn" data-fan-mode="MAX">
-				<span class="iconify helty-ctrl-icon" data-icon="mdi-fan-speed-4"></span>
-				<span class="helty-ctrl-label" data-i18n-key="helty-ctrl-max">Max</span>
-			</button>
-			<button type="button" class="helty-ctrl-btn" data-fan-mode="BOOST">
-				<span class="iconify helty-ctrl-icon" data-icon="mdi-fan-plus"></span>
-				<span class="helty-ctrl-label" data-i18n-key="helty-ctrl-boost">Hypervent.</span>
-			</button>
-			<button type="button" class="helty-ctrl-btn" data-fan-mode="NIGHT">
-				<span class="iconify helty-ctrl-icon" data-icon="mdi-weather-night"></span>
-				<span class="helty-ctrl-label" data-i18n-key="helty-ctrl-night">Night</span>
-			</button>
-			<button type="button" class="helty-ctrl-btn" data-fan-mode="FREE_COOLING">
-				<span class="iconify helty-ctrl-icon" data-icon="mdi-waves"></span>
-				<span class="helty-ctrl-label" data-i18n-key="helty-ctrl-freecooling">Freecooling</span>
-			</button>
-			<button type="button" class="helty-ctrl-btn" data-fan-mode="OFF">
-				<span class="iconify helty-ctrl-icon" data-icon="mdi-power"></span>
-				<span class="helty-ctrl-label" data-i18n-key="helty-ctrl-off">HRV Off</span>
-			</button>
-			<button type="button" class="helty-ctrl-btn" data-action="led">
-				<span class="iconify helty-ctrl-icon" data-icon="mdi-lightbulb-outline"></span>
-				<span class="helty-ctrl-label" data-i18n-key="helty-ctrl-led">LED</span>
-			</button>
-			<button type="button" class="helty-ctrl-btn" data-action="reset-filter">
-				<span class="iconify helty-ctrl-icon" data-icon="mdi-filter-outline"></span>
-				<span class="helty-ctrl-label" data-i18n-key="helty-ctrl-reset-filter">Reset filter</span>
-			</button>
-		</div>
-		<div id="helty_manage_message" class="helty-status"></div>
-    </section>
-
-	<section id="EuromDiscover" class="tabName">
-		<div id="eid-setup">
-		<h1 class="align-c" data-i18n-key="eurom-discover-title">EUROM Discover</h1>
-		<p data-i18n-key="eurom-discover-intro">Connect one EUROM Sani IR panel on your LAN (Tuya TCP port 6668). Scan finds host and device id. The local key cannot be invented â€” paste it from tinytuya / EUROM Smart.</p>
-		<hr>
-		<label for="eurom_name" data-i18n-key="eurom-name">Name</label><br>
-		<input type="text" id="eurom_name" placeholder="Bathroom" style="width:100%"><br><br>
-		<label for="eurom_host" data-i18n-key="eurom-host">Host / IP address</label><br>
-		<input type="text" id="eurom_host" placeholder="192.168.1.40" style="width:100%"><br><br>
-		<label for="eurom_port" data-i18n-key="eurom-port">Port</label><br>
-		<input type="number" id="eurom_port" value="6668"><br><br>
-		<label for="eurom_device_id" data-i18n-key="eurom-device-id">Device ID</label><br>
-		<input type="text" id="eurom_device_id" placeholder="bfxxxxxxxx" style="width:100%"><br><br>
-		<label for="eurom_local_key" data-i18n-key="eurom-local-key">Local key</label><br>
-		<input type="password" id="eurom_local_key" autocomplete="off" placeholder="" style="width:100%"><br>
-		<div id="eurom_key_hint" class="helty-status"></div><br>
-		<label for="eurom_protocol" data-i18n-key="eurom-protocol">Protocol</label><br>
-		<select id="eurom_protocol">
-			<option value="3.3">3.3</option>
-			<option value="3.4">3.4</option>
-			<option value="3.5">3.5</option>
-		</select><br><br>
-		<label for="eurom_poll" data-i18n-key="eurom-poll-interval">Poll interval (seconds)</label><br>
-		<input type="number" id="eurom_poll" value="30" min="10"><br><br>
-		<label><input type="checkbox" id="eurom_enabled"> <span data-i18n-key="eurom-enabled">Enable EUROM hub</span></label>
-		<hr>
-		<div class="align-c">
-			<button type="button" onclick="euromTest()" data-i18n-key="eurom-btn-test">Test connection</button>
-			<button type="button" onclick="euromScan()" data-i18n-key="eurom-btn-scan">Scan network</button>
-			<button type="button" onclick="euromSave()" data-i18n-key="btn-save">Save</button>
-		</div>
-		<div id="eurom_discover_status" class="helty-status"></div>
-		<div id="eurom_scan_progress" class="helty-status"></div>
-		<table id="eurom_scan_results" style="display:none">
-			<thead><tr>
-				<th data-i18n-key="eurom-col-host">Host</th>
-				<th data-i18n-key="eurom-col-device">Device ID</th>
-				<th data-i18n-key="eurom-col-version">Version</th>
-				<th></th>
-			</tr></thead>
-			<tbody id="eurom_scan_results_body"></tbody>
-		</table>
-		</div>
-    </section>
-
-	<section id="EuromManagement" class="tabName">
-		<h2 class="align-c" data-i18n-key="eurom-management-title">EUROM Management</h2>
-		<div class="helty-status-header">
-			<div id="eurom_status_badge" class="helty-status-bar">...</div>
-			<button type="button" id="eurom_refresh_btn" onclick="euromRefreshLive()">
-				<span class="iconify" data-icon="mdi-refresh"></span>
-				<span data-i18n-key="eurom-btn-refresh">Refresh</span>
-			</button>
-		</div>
-		<div id="eurom_telemetry" class="outer"></div>
-		<hr>
-		<h3 class="align-c"><span class="iconify" data-icon="mdi-tune-variant"></span> <span data-i18n-key="eurom-controls">Controls</span></h3>
-		<div id="eurom_ctrl_grid" class="helty-ctrl-grid">
-			<button type="button" class="helty-ctrl-btn" data-action="on">
-				<span class="iconify helty-ctrl-icon" data-icon="mdi-power"></span>
-				<span class="helty-ctrl-label" data-i18n-key="eurom-btn-on">On</span>
-			</button>
-			<button type="button" class="helty-ctrl-btn" data-action="off">
-				<span class="iconify helty-ctrl-icon" data-icon="mdi-power-off"></span>
-				<span class="helty-ctrl-label" data-i18n-key="eurom-btn-off">Off</span>
-			</button>
-		</div>
-		<div class="eurom-setpoint-row">
-			<button type="button" class="helty-ctrl-btn eurom-setpoint-btn" data-action="setpoint-down" aria-label="-">
-				<span class="iconify helty-ctrl-icon" data-icon="mdi-minus"></span>
-			</button>
-			<div class="eurom-setpoint-value">
-				<div id="eurom_setpoint_value">â€”</div>
-				<div class="eurom-setpoint-label" data-i18n-key="eurom-setpoint-label">Setpoint</div>
+	<section id="HubDevices" class="tabName hub-page">
+		<h2 data-i18n-key="hub-scan-title">Devices</h2>
+		<div class="settings-pane hub-scan-pane">
+			<p class="settings-help" data-i18n-key="hub-scan-intro">Scan the LAN, then assign a device to Air Guard, WiZ, or EUROM.</p>
+			<div class="settings-card-actions">
+				<button type="button" class="btn" id="hub_scan_btn" onclick="hubScanStart()" data-i18n-key="hub-scan-btn">Scan network</button>
 			</div>
-			<button type="button" class="helty-ctrl-btn eurom-setpoint-btn" data-action="setpoint-up" aria-label="+">
-				<span class="iconify helty-ctrl-icon" data-icon="mdi-plus"></span>
-			</button>
+			<div class="hub-scan-track" id="hub_scan_track" hidden>
+				<div class="hub-scan-fill" id="hub_scan_fill"></div>
+			</div>
+			<div id="hub_scan_status" class="helty-status" role="status"></div>
 		</div>
-		<div id="eurom_manage_message" class="helty-status"></div>
+		<div class="settings-card">
+			<div class="settings-card-header">
+				<h3 data-i18n-key="hub-scan-helty">Air Guard</h3>
+			</div>
+			<div id="hub_scan_helty" class="hub-scan-list"></div>
+		</div>
+		<div class="settings-card">
+			<div class="settings-card-header">
+				<h3 data-i18n-key="hub-scan-wiz">WiZ lights</h3>
+			</div>
+			<div id="hub_scan_wiz" class="hub-scan-list"></div>
+		</div>
+		<div class="settings-card">
+			<div class="settings-card-header">
+				<h3 data-i18n-key="hub-scan-eurom">EUROM</h3>
+			</div>
+			<div id="hub_scan_eurom" class="hub-scan-list"></div>
+		</div>
+	</section>
+
+	<section id="HeltyManagement" class="tabName hub-page">
+		<h2 data-i18n-key="helty-management-title">Air Guard</h2>
+		<div class="settings-pane">
+			<p class="settings-help" data-i18n-key="helty-discover-intro">Assign from Devices, or enter the host.</p>
+			<div class="settingDiv">
+				<div><label for="helty_host" data-i18n-key="helty-host">Host / IP address</label></div>
+				<div class="settings-right"><input type="text" id="helty_host" placeholder="192.168.1.50"></div>
+			</div>
+			<div class="settingDiv">
+				<div><label for="helty_port" data-i18n-key="helty-port">Port</label></div>
+				<div class="settings-right"><input type="number" id="helty_port" value="5001"></div>
+			</div>
+			<input type="hidden" id="helty_poll" value="30">
+			<div class="settingDiv">
+				<div><label for="helty_enabled" data-i18n-key="helty-enabled">Enable Air Guard hub</label></div>
+				<div class="settings-right"><input type="checkbox" id="helty_enabled"></div>
+			</div>
+			<div class="settings-card-actions">
+				<button type="button" class="btn" onclick="heltyTest()" data-i18n-key="helty-btn-test">Test connection</button>
+				<button type="button" class="btn" onclick="heltySave()" data-i18n-key="btn-save">Save</button>
+			</div>
+			<div id="helty_discover_status" class="helty-status"></div>
+		</div>
+		<div class="settings-pane">
+			<div class="helty-status-header">
+				<div id="helty_status_badge" class="helty-status-bar">...</div>
+			</div>
+			<div id="helty_telemetry" class="hub-metrics"></div>
+			<div class="settings-card">
+				<div class="settings-card-header">
+					<h3><span class="iconify" data-icon="mdi-tune-variant"></span> <span data-i18n-key="helty-controls">Controls</span></h3>
+				</div>
+				<div id="helty_ctrl_grid" class="helty-ctrl-grid">
+					<button type="button" class="helty-ctrl-btn" data-fan-mode="LOW">
+						<span class="iconify helty-ctrl-icon" data-icon="mdi-fan-speed-1"></span>
+						<span class="helty-ctrl-label" data-i18n-key="helty-ctrl-low">Low</span>
+					</button>
+					<button type="button" class="helty-ctrl-btn" data-fan-mode="MEDIUM">
+						<span class="iconify helty-ctrl-icon" data-icon="mdi-fan-speed-2"></span>
+						<span class="helty-ctrl-label" data-i18n-key="helty-ctrl-medium">Medium</span>
+					</button>
+					<button type="button" class="helty-ctrl-btn" data-fan-mode="HIGH">
+						<span class="iconify helty-ctrl-icon" data-icon="mdi-fan-speed-3"></span>
+						<span class="helty-ctrl-label" data-i18n-key="helty-ctrl-high">High</span>
+					</button>
+					<button type="button" class="helty-ctrl-btn" data-fan-mode="MAX">
+						<span class="iconify helty-ctrl-icon" data-icon="mdi-fan-speed-4"></span>
+						<span class="helty-ctrl-label" data-i18n-key="helty-ctrl-max">Max</span>
+					</button>
+					<button type="button" class="helty-ctrl-btn" data-fan-mode="BOOST">
+						<span class="iconify helty-ctrl-icon" data-icon="mdi-fan-plus"></span>
+						<span class="helty-ctrl-label" data-i18n-key="helty-ctrl-boost">Hypervent.</span>
+					</button>
+					<button type="button" class="helty-ctrl-btn" data-fan-mode="NIGHT">
+						<span class="iconify helty-ctrl-icon" data-icon="mdi-weather-night"></span>
+						<span class="helty-ctrl-label" data-i18n-key="helty-ctrl-night">Night</span>
+					</button>
+					<button type="button" class="helty-ctrl-btn" data-fan-mode="FREE_COOLING">
+						<span class="iconify helty-ctrl-icon" data-icon="mdi-waves"></span>
+						<span class="helty-ctrl-label" data-i18n-key="helty-ctrl-freecooling">Freecooling</span>
+					</button>
+					<button type="button" class="helty-ctrl-btn" data-fan-mode="OFF">
+						<span class="iconify helty-ctrl-icon" data-icon="mdi-power"></span>
+						<span class="helty-ctrl-label" data-i18n-key="helty-ctrl-off">HRV Off</span>
+					</button>
+					<button type="button" class="helty-ctrl-btn" data-action="led">
+						<span class="iconify helty-ctrl-icon" data-icon="mdi-lightbulb-outline"></span>
+						<span class="helty-ctrl-label" data-i18n-key="helty-ctrl-led">LED</span>
+					</button>
+					<button type="button" class="helty-ctrl-btn" data-action="reset-filter">
+						<span class="iconify helty-ctrl-icon" data-icon="mdi-filter-outline"></span>
+						<span class="helty-ctrl-label" data-i18n-key="helty-ctrl-reset-filter">Reset filter</span>
+					</button>
+				</div>
+				<div id="helty_manage_message" class="helty-status"></div>
+			</div>
+		</div>
     </section>
 
-	<section id="WizLights" class="tabName">
-		<div id="eid-setup">
-		<h1 class="align-c" data-i18n-key="wiz-title">WiZ Lights</h1>
-		<p data-i18n-key="wiz-intro">Discover and control Philips WiZ lights on your LAN (UDP port 38899).</p>
-		<p data-i18n-key="wiz-name-hint">Lights are named by MAC because bulbs do not expose a unique nickname on the LAN. Rename any card. Rooms follow your WiZ app grouping (roomId).</p>
-		<p data-i18n-key="wiz-local-hint">Enable <strong>Allow local communication</strong> in the WiZ app (Settings â†’ Security) so bulbs respond on the LAN when off.</p>
-		<hr>
-		<label><input type="checkbox" id="wiz_enabled"> <span data-i18n-key="wiz-enabled">Enable WiZ hub</span></label><br><br>
-		<label for="wiz_poll" data-i18n-key="wiz-poll-interval">Poll interval (seconds)</label><br>
-		<input type="number" id="wiz_poll" value="30" min="10"><br><br>
-		<label for="wiz_probe_ip" data-i18n-key="wiz-probe-ip-label">Add by IP</label><br>
-		<input type="text" id="wiz_probe_ip" placeholder="192.168.1.50" style="width:100%"><br><br>
-		<div class="align-c">
-			<button type="button" onclick="wizSaveConfig()" data-i18n-key="btn-save">Save</button>
-			<button type="button" onclick="wizScan()" data-i18n-key="wiz-btn-scan">Scan network</button>
-			<button type="button" onclick="wizProbeIp()" data-i18n-key="wiz-btn-probe">Probe</button>
-			<button type="button" onclick="wizAllCommand(false)" data-i18n-key="wiz-btn-all-off">All off</button>
-			<button type="button" onclick="wizAllCommand(true)" data-i18n-key="wiz-btn-all-on">All on</button>
+	<section id="EuromManagement" class="tabName hub-page">
+		<h2 data-i18n-key="eurom-management-title">EUROM</h2>
+		<div class="settings-pane">
+			<p class="settings-help" data-i18n-key="eurom-discover-intro">Assign from Devices, then paste the local key.</p>
+			<div class="settingDiv">
+				<div><label for="eurom_name" data-i18n-key="eurom-name">Name</label></div>
+				<div class="settings-right"><input type="text" id="eurom_name" placeholder="Bathroom"></div>
+			</div>
+			<div class="settingDiv">
+				<div><label for="eurom_host" data-i18n-key="eurom-host">Host / IP address</label></div>
+				<div class="settings-right"><input type="text" id="eurom_host" placeholder="192.168.1.40"></div>
+			</div>
+			<div class="settingDiv">
+				<div><label for="eurom_port" data-i18n-key="eurom-port">Port</label></div>
+				<div class="settings-right"><input type="number" id="eurom_port" value="6668"></div>
+			</div>
+			<div class="settingDiv">
+				<div><label for="eurom_device_id" data-i18n-key="eurom-device-id">Device ID</label></div>
+				<div class="settings-right"><input type="text" id="eurom_device_id" placeholder="bfxxxxxxxx"></div>
+			</div>
+			<div class="settingDiv">
+				<div><label for="eurom_local_key" data-i18n-key="eurom-local-key">Local key</label></div>
+				<div class="settings-right"><input type="password" id="eurom_local_key" autocomplete="off"></div>
+			</div>
+			<div id="eurom_key_hint" class="helty-status"></div>
+			<div class="settingDiv">
+				<div><label for="eurom_protocol" data-i18n-key="eurom-protocol">Protocol</label></div>
+				<div class="settings-right">
+					<select id="eurom_protocol">
+						<option value="3.3">3.3</option>
+						<option value="3.4">3.4</option>
+						<option value="3.5">3.5</option>
+					</select>
+				</div>
+			</div>
+			<input type="hidden" id="eurom_poll" value="30">
+			<div class="settingDiv">
+				<div><label for="eurom_enabled" data-i18n-key="eurom-enabled">Enable EUROM hub</label></div>
+				<div class="settings-right"><input type="checkbox" id="eurom_enabled"></div>
+			</div>
+			<div class="settings-card-actions">
+				<button type="button" class="btn" onclick="euromTest()" data-i18n-key="eurom-btn-test">Test connection</button>
+				<button type="button" class="btn" onclick="euromSave()" data-i18n-key="btn-save">Save</button>
+			</div>
+			<div id="eurom_discover_status" class="helty-status"></div>
 		</div>
-		<div id="wiz_status" class="wiz-status"></div>
-		<div id="wiz_scan_progress" class="wiz-status"></div>
-		<h3 data-i18n-key="wiz-scan-results">Found lights</h3>
-		<table id="wiz_scan_table" style="display:none">
-			<thead><tr>
-				<th></th>
-				<th data-i18n-key="wiz-col-name">Name</th>
-				<th data-i18n-key="wiz-col-room">Room</th>
-				<th data-i18n-key="wiz-col-ip">IP</th>
-				<th data-i18n-key="wiz-col-mac">MAC</th>
-			</tr></thead>
-			<tbody id="wiz_scan_body"></tbody>
-		</table>
-		<div class="align-c">
-			<button type="button" onclick="wizAddSelected()" data-i18n-key="wiz-btn-add-selected">Add selected</button>
+		<div class="settings-pane">
+			<div class="helty-status-header">
+				<div id="eurom_status_badge" class="helty-status-bar">...</div>
+			</div>
+			<div id="eurom_telemetry" class="hub-metrics"></div>
+			<div class="settings-card">
+				<div class="settings-card-header">
+					<h3><span class="iconify" data-icon="mdi-tune-variant"></span> <span data-i18n-key="eurom-controls">Controls</span></h3>
+				</div>
+				<div id="eurom_ctrl_grid" class="helty-ctrl-grid">
+					<button type="button" class="helty-ctrl-btn" data-action="on">
+						<span class="iconify helty-ctrl-icon" data-icon="mdi-power"></span>
+						<span class="helty-ctrl-label" data-i18n-key="eurom-btn-on">On</span>
+					</button>
+					<button type="button" class="helty-ctrl-btn" data-action="off">
+						<span class="iconify helty-ctrl-icon" data-icon="mdi-power-off"></span>
+						<span class="helty-ctrl-label" data-i18n-key="eurom-btn-off">Off</span>
+					</button>
+				</div>
+				<div class="eurom-setpoint-row">
+					<button type="button" class="helty-ctrl-btn eurom-setpoint-btn" data-action="setpoint-down" aria-label="-">
+						<span class="iconify helty-ctrl-icon" data-icon="mdi-minus"></span>
+					</button>
+					<div class="eurom-setpoint-value">
+						<div id="eurom_setpoint_value">—</div>
+						<div class="eurom-setpoint-label" data-i18n-key="eurom-setpoint-label">Setpoint</div>
+					</div>
+					<button type="button" class="helty-ctrl-btn eurom-setpoint-btn" data-action="setpoint-up" aria-label="+">
+						<span class="iconify helty-ctrl-icon" data-icon="mdi-plus"></span>
+					</button>
+				</div>
+				<div id="eurom_manage_message" class="helty-status"></div>
+			</div>
 		</div>
+    </section>
+
+	<section id="WizLights" class="tabName hub-page">
+		<h2 data-i18n-key="wiz-title">WiZ Lights</h2>
+		<div class="settings-pane">
+			<p class="settings-help" data-i18n-key="wiz-intro">Assign lights from Devices. In the WiZ app, allow local communication.</p>
+			<div class="settingDiv">
+				<div><label for="wiz_enabled" data-i18n-key="wiz-enabled">Enable WiZ hub</label></div>
+				<div class="settings-right"><input type="checkbox" id="wiz_enabled"></div>
+			</div>
+			<input type="hidden" id="wiz_poll" value="30">
+			<div class="settingDiv">
+				<div><label for="wiz_probe_ip" data-i18n-key="wiz-probe-ip-label">Add by IP</label></div>
+				<div class="settings-right"><input type="text" id="wiz_probe_ip" placeholder="192.168.1.50"></div>
+			</div>
+			<div class="settings-card-actions">
+				<button type="button" class="btn" onclick="wizSaveConfig()" data-i18n-key="btn-save">Save</button>
+				<button type="button" class="btn" onclick="wizProbeIp()" data-i18n-key="wiz-btn-probe">Probe</button>
+				<button type="button" class="btn" onclick="wizAllCommand(false)" data-i18n-key="wiz-btn-all-off">All off</button>
+				<button type="button" class="btn" onclick="wizAllCommand(true)" data-i18n-key="wiz-btn-all-on">All on</button>
+			</div>
+			<div id="wiz_status" class="wiz-status"></div>
 		</div>
-		<h2 class="align-c" data-i18n-key="wiz-my-lights">My lights</h2>
+		<h2 data-i18n-key="wiz-my-lights">My lights</h2>
 		<div id="wiz_light_grid" class="wiz-grid"></div>
     </section>
-
-	<section id="Solar" class="tabName">
-		<div id=eid-setup>
-		<i id=pulse_ico class="iconify" data-icon="mdi-pulse"></i>
-		<h1 class=align-c>Solar Setup</h1><br>
-		<div data-i18n-key="sol-intro-1">Instellen van de koppeling met de PV omvormer om de opbrengst zichtbaar te maken in NRG Monitor. Deze configuratie is in te zien en te wijzigen via het bestandsbeheer van de dongle.<br>
-		<br>
-		</div>
-		<hr>
-		<form id="dataForm">
-		<p data-i18n-key="sol-sys">Welk systeem dient gekoppeld te worden?</p>
- 		Â  <input type="radio" id="pv_enphase" name="solar_system" value="Enphase" onClick="ShowHidePV();" checked="checked">
- 		Â  <label for="enphase">Enphase</label><br>
-		Â  <input type="radio" id="pv_solaredge" name="solar_system" value="SolarEdge" onClick="ShowHidePV();">
-		Â  <label for="solaredge">SolarEdge</label><br>
-
-  <section id="Settings" class="tabName">
+<section id="Settings" class="tabName">
       <!-- START Tabbladen -->
   <h2 data-i18n-key="tle-settings">Instellingen</h2>
   

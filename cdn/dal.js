@@ -340,7 +340,11 @@ class dsmr_dal_main{
 
 	#startLiveSource(source) {
 		this.streamDesired[source] = true;
-		if (this.ws.isActive()) return;
+		if (this.ws.isActive()) {
+			// WS snapshot may have arrived before this tab subscribed; fetch once now.
+			this.streams[source].refresh();
+			return;
+		}
 		this.streams[source].start();
 	}
 

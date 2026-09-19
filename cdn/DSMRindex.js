@@ -561,8 +561,11 @@ window.addEventListener('popstate', function (event) {
 });
 
 window.addEventListener('hashchange', () => {
-  console.log('Hash changed:', window.location.hash);
-  // Handle the hash change here
+  const hash = (location.hash || "").slice(1).split("?")[0];
+  if (!hash || hash === "Redirect" || hash === "UpdateStart" || hash === "Logout" || hash === "Updating") return;
+  const btn = document.getElementById("b" + hash);
+  activeTab = btn ? btn.id : ("b" + hash);
+  openTab();
 });
 
 
@@ -1730,6 +1733,7 @@ function SendNetSwitchJson() {
     if (typeof heltyStopManagementPolling === "function") heltyStopManagementPolling();
     if (typeof euromStopManagementPolling === "function") euromStopManagementPolling();
     if (typeof wizStopPolling === "function") wizStopPolling();
+    if (typeof hubScanStopPolling === "function") hubScanStopPolling();
 	if (objDAL) {
 		objDAL.stopDashLivePolling();
 		objDAL.stopDashHistPolling();
@@ -1790,9 +1794,10 @@ function SendNetSwitchJson() {
 		case "bNRGM":
 			nrgm_getstatus();
 			break;
-		case "bHeltyDiscover":
-			heltyStartDiscover();
+		case "bHubDevices":
+			hubScanStartPage();
 			break;
+		case "bHeltyDiscover":
 		case "bHeltyManagement":
 			heltyStartManagement();
 			break;
@@ -1800,8 +1805,6 @@ function SendNetSwitchJson() {
 			wizStartPage();
 			break;
 		case "bEuromDiscover":
-			euromStartDiscover();
-			break;
 		case "bEuromManagement":
 			euromStartManagement();
 			break;
@@ -4982,8 +4985,7 @@ function handle_menu_click()
 			this.classList.add("active");
 
 			activeTab = this.id;
-			//console.log("ActiveID - " + activeTab );
-// 			openTab();  		
+			openTab();
   		});
 	}
 }
@@ -5036,7 +5038,17 @@ const FALLBACK_TRANSLATIONS = {
     "lbl-history-order-new-to-old-short": "new→old",
     "lbl-history-order-old-to-new-short": "old→new",
     "tip-history-graph-new-to-old": "X-axis: newest to oldest. Click for oldest to newest.",
-    "tip-history-graph-old-to-new": "X-axis: oldest to newest. Click for newest to oldest."
+    "tip-history-graph-old-to-new": "X-axis: oldest to newest. Click for newest to oldest.",
+    "mnu-devices": "Devices",
+    "hub-scan-title": "Devices",
+    "hub-scan-intro": "One LAN scan for Air Guard, WiZ, and EUROM. Assign a found device to its hub.",
+    "hub-scan-btn": "Scan network",
+    "hub-scan-assign": "Assign",
+    "hub-scan-assigned": "Assigned",
+    "hub-scan-none": "Nothing found yet.",
+    "hub-scan-starting": "Starting network scan…",
+    "hub-scan-done": "Scan complete.",
+    "hub-scan-empty": "Scan complete — no devices found."
   },
   de: {
     "accu-status-idle": "Inaktiv",
@@ -5108,10 +5120,15 @@ const FALLBACK_TRANSLATIONS = {
     "tip-history-graph-old-to-new": "Axe X : du plus ancien au plus récent. Cliquez pour inverser l'ordre."
   }
 };
+function resolveCdnBase() {
+  if (typeof CDN_BASE !== "undefined") return CDN_BASE;
+  if (typeof window.__cdnBase === "function") return window.__cdnBase();
+  return "https://cdn.jsdelivr.net/gh/p-chodorowski/P1-Dongel-ESP32@5.8.7/cdn";
+}
+
 const URL_I18N = typeof DEBUG !== 'undefined' && DEBUG
   ? "http://localhost/~martijn/dsmr-api/v5/lang"
-  : (typeof CDN_BASE !== 'undefined' ? CDN_BASE
-       : "https://cdn.jsdelivr.net/gh/p-chodorowski/P1-Dongel-ESP32@5.8.7/cdn") + "/lang";
+  : resolveCdnBase() + "/lang";
 
 function t(key) {
   return translations[key] || FALLBACK_TRANSLATIONS[locale]?.[key] || FALLBACK_TRANSLATIONS.en[key] || key;
